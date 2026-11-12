@@ -12,15 +12,17 @@ Large mechanisms are handled by working on a small part:
     the mentioned ones. Dropping constraints only adds configurations, so a proof there is a
     proof for the whole mechanism. A counterexample there may not be real, so it widens instead.
 """
+import copy
 import time
 from dataclasses import dataclass, field
 
 import z3
-from sympy import And, Not, true
+from sympy import And, Eq, Ge, Not, Symbol, true
 
 from .claims import ClaimError, Evaluator, mentioned, parse
 from .compile import compile_spec
 from .graph import WORLD, Graph
+from .joints import limits
 from .logic import Z3, ForAll, quantified
 from .spec import SpecError
 
@@ -36,6 +38,8 @@ class Result:
     group: int = 0
     seconds: float = 0.0
     model: dict = field(default_factory=dict)
+    assume: list = field(default_factory=list)   # extra parameter conditions for this claim
+    given: list = field(default_factory=list)    # joints whose coordinates are quantified first
 
 
 def read_claims(entries):
@@ -46,7 +50,13 @@ def read_claims(entries):
         kinds = [k for k in ("always", "possible") if k in e]
         if len(kinds) != 1:
             raise SpecError(f"claim {i} needs exactly one of 'always:' or 'possible:'")
-        out.append((str(e.get("name", f"claim{i}")), kinds[0], str(e[kinds[0]])))
+        assume = e.get("assume", [])
+        given = e.get("given", [])
+        assume = [str(a) for a in (assume if isinstance(assume, list) else [assume])]
+        given = [str(g) for g in (given if isinstance(given, list) else [given])]
+        if given and kinds[0] != "possible":
+            raise SpecError(f"claim {i}: 'given:' only applies to 'possible:' claims")
+        out.append((str(e.get("name", f"claim{i}")), kinds[0], str(e[kinds[0]]), assume, given))
     return out
 
 
@@ -126,19 +136,20 @@ class Prover:
         self.log = log or (lambda msg: None)
         self.graph = Graph(spec)
 
-    def prove(self, name, kind, text):
+    def prove(self, name, kind, text, assume=(), given=()):
         t0 = time.time()
         try:
-            res = self._prove(name, kind, text)
+            res = self._prove(name, kind, text, list(assume), list(given))
         except SpecError as err:
             res = Result(name, kind, text, "error", str(err))
         res.seconds = time.time() - t0
         return res
 
-    def _prove(self, name, kind, text):
+    def _prove(self, name, kind, text, assume, given):
         tree = parse(text)
+        self.assume_trees = [parse(a) for a in assume]
         seeds = []
-        for n in mentioned(tree):
+        for n in mentioned(tree) + given:
             if n in self.spec.bodies and n != WORLD:
                 new = [n]
             else:
@@ -147,7 +158,7 @@ class Prover:
         self.root = seeds[0] if seeds else None
         self.seeds = seeds
         group = self.graph.group(seeds)
-        base = Result(name, kind, text, "unknown", group=len(group))
+        base = Result(name, kind, text, "unknown", group=len(group), assume=assume, given=given)
 
         if len(group) <= self.max_bodies:
             return self._attempt(base, tree, self.graph.subspec(group, first=self.root), "exact")
@@ -183,18 +194,23 @@ class Prover:
         """mode: 'exact' (the whole connected group), 'relaxed' (constraints to the rest dropped:
         more configurations) or 'restricted' (joints outside the part held at zero: fewer)."""
         n = part_size if part_size is not None else len(sub.bodies) - (WORLD in sub.bodies)
-        res = Result(base.name, base.kind, base.text, "unknown", group=base.group, bodies=n)
+        res = Result(base.name, base.kind, base.text, "unknown", group=base.group, bodies=n,
+                     assume=base.assume, given=base.given)
         sub = self.graph.prune(sub, self.seeds)
         system = compile_spec(sub, shapes=False)
-        phi = Evaluator(sub, system).formula(tree)
+        ev = Evaluator(sub, system)
+        phi = ev.formula(tree)
         C = system.formula()
-        A = And(*self.spec.assumptions) if self.spec.assumptions else true
+        A = And(*self.spec.assumptions, *[ev.formula(t) for t in self.assume_trees])
+        if A.free_symbols - set(self.spec.params):
+            raise ClaimError("'assume:' may only mention parameters")
+        G, match, fresh = self._given(base.given, system, sub)
         params = set(self.spec.params) & (C.free_symbols | phi.free_symbols | A.free_symbols)
         if base.kind == "always":
             query, sat_means = And(A, C, Not(phi)), "refuted"
-        elif params:
-            body = Not(And(C, phi))
-            query = And(A, ForAll(system.variables, body) if system.variables else body)
+        elif params or fresh:
+            body = Not(And(C, match, phi))
+            query = And(A, G, ForAll(system.variables, body) if system.variables else body)
             sat_means = "refuted"
         else:
             query, sat_means = And(A, C, phi), "proved"
@@ -214,8 +230,8 @@ class Prover:
             res.status = "inconclusive"
             return res
         if r == z3.sat and model is not None:
-            names = [p.name for p in params]          # a refuted 'possible': only parameters matter
-            if not (base.kind == "possible" and params):
+            names = [p.name for p in params] + [f.name for f in fresh]
+            if not (base.kind == "possible" and (params or fresh)):   # then only these matter
                 names = [v.name for v in system.variables] + names
             res.model = {k: _value(model[k]) for k in names if k in model}
         res.status = status
@@ -224,6 +240,32 @@ class Prover:
                       "restricted": f"{n} nearest of {base.group} connected bodies free, "
                                     "joints of the others held at zero"}[mode] + f", {how}"
         return res
+
+    def _given(self, names, system, sub):
+        """For 'given: [joint, ...]': fresh variables for the joints' coordinates, the joints' own
+        limits on them, and equations tying them to the configuration."""
+        joints = {j.name: j for j in system.joints}
+        rel, match, fresh = [], [], []
+        for name in names:
+            if name not in joints:
+                raise ClaimError(f"given: unknown joint {name!r}")
+            j = joints[name]
+            if not j.values:
+                raise ClaimError(f"given: joint {name!r} has no coordinates")
+            if "cone" in j.opts:
+                raise ClaimError(f"given: joint {name!r} has a cone limit, which is not supported here")
+            vals = {r: Symbol(f"{name}.{r}", real=True) for r in j.values}
+            fresh += list(vals.values())
+            for cr, sr in (("c", "s"), ("c1", "s1"), ("c2", "s2")):
+                if cr in vals:
+                    rel.append(Eq(vals[cr]**2 + vals[sr]**2, 1))
+            if "q0" in vals:
+                rel.append(Eq(sum(vals[f"q{i}"]**2 for i in range(4)), 1))
+            proxy = copy.copy(j)
+            proxy.values, proxy.theta = vals, {}
+            rel += [Ge(g, 0) for g in limits(proxy, sub, False)]
+            match += [Eq(j.values[r], v) for r, v in vals.items()]
+        return And(*rel), And(*match), fresh
 
     def prove_all(self, entries):
         return list(self.iter_prove(entries))
@@ -236,7 +278,10 @@ class Prover:
 def report(results):
     lines = []
     for r in results:
-        lines.append(f"[{r.status.upper():7s}] {r.name}: {r.kind} {r.text}")
+        pre = f"for every {', '.join(r.given)}: " if r.given else ""
+        lines.append(f"[{r.status.upper():7s}] {r.name}: {r.kind} {pre}{r.text}")
+        if r.assume:
+            lines.append(f"          assuming {' and '.join(r.assume)}")
         info = f"{r.detail}; " if r.detail else ""
         lines.append(f"          {info}{r.seconds:.2f} s")
         if r.model:
@@ -245,7 +290,7 @@ def report(results):
             elif r.status == "proved":
                 kind = "witness"
             else:
-                kind = "parameters with no such configuration"
+                kind = "values with no such configuration"
             shown = list(r.model.items())[:16]
             lines.append(f"          {kind}: " + ", ".join(f"{k} = {v}" for k, v in shown)
                          + (" ..." if len(r.model) > 16 else ""))

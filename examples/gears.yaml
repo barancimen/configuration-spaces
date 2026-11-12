@@ -16,3 +16,14 @@ constraints:
     range: [-pi/2, pi/2]
   - gear: [p, w]
     teeth: [20, 40]
+
+claims:
+  - name: pinionDoubleAngle        # cos(-2w) = 2 cos(w)^2 - 1
+    always: "p.c == 2*w.c^2 - 1"
+  - name: turnOppositeWays         # needs the wheel's range
+    always: "p.s * w.s <= 0"
+  - name: pinionHalfTurn
+    possible: "p.c == -1"
+  - name: everyWheelAngle          # the gear train never jams within the wheel's range
+    given: [w]
+    possible: "True"

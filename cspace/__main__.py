@@ -1,10 +1,10 @@
-"""python3 -m cspace spec.yaml [-o out.wl|out.json|-] [--coords reduced|maximal] [--trig] [--check]"""
+"""python3 -m cspace spec.yaml [-o out.json|-] [--coords reduced|maximal] [--trig] [--check] [--prove]"""
 import argparse
 import sys
 from pathlib import Path
 
 from .compile import ALL_KINDS, compile_spec
-from .export import summary, to_json, to_wl
+from .export import summary, to_json
 from .spec import SpecError, load
 
 
@@ -13,8 +13,7 @@ def main(argv=None):
                                  "into the algebraic equations of its configuration space.")
     ap.add_argument("spec", help="mechanism file (YAML)")
     ap.add_argument("-o", "--output", help="output file; '-' for standard output "
-                    "(default: <spec name>.wl in the current directory)")
-    ap.add_argument("--format", choices=["wl", "json"], help="default: from the output suffix, else wl")
+                    "(default: <spec name>.json in the current directory)")
     ap.add_argument("--coords", choices=["reduced", "maximal"], default="reduced",
                     help="reduced: joint coordinates on a spanning tree (default); "
                          "maximal: every body gets 3 positions + a unit quaternion")
@@ -48,9 +47,8 @@ def main(argv=None):
         print(f"error: {err}", file=sys.stderr)
         return 2
 
-    fmt = args.format or ("json" if (args.output or "").endswith(".json") else "wl")
-    text = to_json(system) if fmt == "json" else to_wl(system)
-    out = args.output or f"{Path(args.spec).stem}.{fmt}"
+    text = to_json(system)
+    out = args.output or f"{Path(args.spec).stem}.json"
     if out == "-":
         sys.stdout.write(text)
     else:

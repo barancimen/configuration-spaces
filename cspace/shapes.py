@@ -4,7 +4,7 @@ Leaves: box [lx, ly, lz] (centred), ball r, cylinder [r, h] (axis z, centred), h
 (numeric vertices), where [relations in x, y, z]. Combinators: union, intersection, difference
 (first child minus the others). Any node may carry a placement `at`, `z`, `x`.
 
-Each node compiles to a closed predicate and an open one (its interior), negation-free.
+Each node compiles to a closed predicate and an open one (its interior).
 Two bodies do not overlap when no point is interior to both.
 """
 from dataclasses import dataclass
@@ -317,6 +317,6 @@ def no_overlap(spec, c, poses, red):
     except SpecError as err:
         raise SpecError(f"no_overlap {c.name!r}: {err}")
     note = None if qf else (f"no_overlap {c.name!r}: part of the condition is quantified "
-                            "(ForAll[{x, y, z}, ...]) because the shapes are not all boxes/hulls, "
+                            "(for all points x, y, z) because the shapes are not all boxes/hulls, "
                             "or a ball meets a polytope")
     return f, note

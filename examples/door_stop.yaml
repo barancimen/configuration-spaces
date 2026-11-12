@@ -12,3 +12,9 @@ constraints:
   - fixed: [world, stop]
   - no_overlap: [door, stop]
     name: blocked
+
+claims:
+  - name: opensTo90
+    possible: "hinge.c == 0 and hinge.s == 1"
+  - name: blockedAt45              # false: the stop is in the way
+    possible: "hinge.c == hinge.s and hinge.c > 0"

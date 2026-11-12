@@ -16,3 +16,13 @@ constraints:
   - revolute: [rod1.b, rod2.a]     # hinge about the frames' z axis: motion in a plane
     name: elbow
     range: [-pi/2, pi/2]
+
+claims:                            # python3 -m cspace examples/two_rods.yaml --prove
+  - name: reachAtLeast             # for every pair of lengths: the hinge range keeps the arm open
+    always: "dist2(pos(rod2.b), [0, 0, 0]) >= l1^2 + l2^2"
+  - name: fullyStretched
+    possible: "dist2(pos(rod2.b), [0, 0, 0]) == (l1 + l2)^2"
+  - name: cannotFoldBack           # false: refuted
+    possible: "dist2(pos(rod2.b), [0, 0, 0]) < l1^2"
+  - name: bentLeftMeansTipUp
+    always: "implies(elbow.s > 0, pos(rod2.b).y > 0)"

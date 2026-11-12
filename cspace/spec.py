@@ -15,8 +15,8 @@ from .se3 import frame
 
 _TRANSFORMS = standard_transformations + (convert_xor, rationalize)
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
-# x, y, z are the coordinates of shape predicates; the capitals are Mathematica built-ins.
-_RESERVED = {"x", "y", "z", "pi", "sqrt", "sin", "cos", "tan", "C", "D", "E", "I", "K", "N", "O"}
+# x, y, z are the coordinates of shape predicates; the rest are functions in spec strings.
+_RESERVED = {"x", "y", "z", "pi", "sqrt", "sin", "cos", "tan"}
 
 
 class SpecError(ValueError):

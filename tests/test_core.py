@@ -1,14 +1,11 @@
 """Milestone 1: joints, loop closure, normal form, export."""
-import re
-
 import pytest
-from sympy import (And, Eq, Ge, Symbol, cos, expand, groebner, pi, reduced, sin, symbols,
-                   mathematica_code)
-from sympy.parsing.mathematica import parse_mathematica
+import json
 
-from cspace import SpecError, to_wl
+from sympy import Symbol, cos, expand, groebner, pi, reduced, sin, symbols, sympify
+
+from cspace import SpecError, to_json
 from cspace.compile import Reducer
-from cspace.logic import ForAll
 from helpers import EXAMPLES, example
 
 ALL = sorted(p.stem for p in EXAMPLES.glob("*.yaml") if p.stem != "screw")
@@ -85,21 +82,14 @@ def test_normal_form_reduces_squares():
 
 
 @pytest.mark.parametrize("name", ALL)
-def test_mathematica_text_parses_back(name):
+def test_json_round_trip(name):
     s = example(name)
-    text = to_wl(s)
-    assert "_" not in re.sub(r'"[^"]*"|\(\*.*?\*\)', "", text), "underscore outside strings/comments"
-    plain = {v: Symbol(v.name) for v in s.variables + s.params}
-    for e in s.equations + s.inequalities:
-        back = parse_mathematica(mathematica_code(e))
-        assert expand(back - e.subs(plain)) == 0
-    for f in s.formulas:
-        if not f.has(ForAll):
-            back = parse_mathematica(mathematica_code(f))
-            assert back == f.subs(plain)
-    for M in s.poses.values():
-        for e in M:
-            assert expand(parse_mathematica(mathematica_code(e)) - e.subs(plain)) == 0
+    data = json.loads(to_json(s))
+    names = {v.name: v for v in s.variables + s.params}
+    back = [sympify(t, locals=names) for t in data["equations"]]
+    assert [expand(a - b) for a, b in zip(back, s.equations)] == [0] * len(s.equations)
+    assert len(data["inequalities"]) == len(s.inequalities)
+    assert set(data["poses"]) == set(s.poses)
 
 
 def test_errors_are_reported_clearly(tmp_path):

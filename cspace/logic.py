@@ -27,9 +27,6 @@ class _Quantifier(Boolean, Basic):
     def _sympystr(self, printer):
         return f"{type(self).__name__}({printer._print(self.variables)}, {printer._print(self.body)})"
 
-    def _mcode(self, printer):
-        return f"{type(self).__name__}[{printer._print(self.variables)}, {printer._print(self.body)}]"
-
 
 class ForAll(_Quantifier):
     pass

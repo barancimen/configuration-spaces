@@ -1,6 +1,6 @@
 """cspace: compile rigid bodies and joint constraints into an algebraic configuration space."""
 from .compile import ALL_KINDS, System, compile_spec
-from .export import summary, to_json, to_wl
+from .export import summary, to_json
 from .spec import SpecError, load
 
 

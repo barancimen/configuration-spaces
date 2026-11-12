@@ -1,45 +1,32 @@
 # cspace
 
-Compile a description of rigid solids and the constraints between them into the
-**configuration space** of the mechanism, written as exact polynomial equations and
-inequalities you can manipulate symbolically (for example in Mathematica). Nothing is
-simulated: no motion, no forces.
+Describe rigid solids and the constraints between them; get the **configuration space** of
+the mechanism as exact polynomial equations and inequalities, and prove or refute claims
+about it. Nothing is simulated: no motion, no forces.
 
 ```
-python3 -m cspace examples/fourbar.yaml            # writes fourbar.wl
-python3 -m cspace examples/fourbar.yaml -o - --format json
-python3 -m cspace examples/bennett.yaml --check    # also measure the dimension numerically
+python3 -m cspace examples/fourbar.yaml               # writes fourbar.json
+python3 -m cspace examples/bennett.yaml -o - --check  # print it; also measure the dimension
+python3 -m cspace examples/cube_on_cube.yaml --prove  # decide the file's claims
 ```
 
-Requires Python 3.10+, SymPy, PyYAML, NumPy, SciPy (z3 for the tests).
+Requires Python 3.10+, SymPy, PyYAML, NumPy, SciPy and z3.
 
 ## What comes out
 
-A semialgebraic set: a list of variables, polynomial equations `== 0`, and a negation-free
-boolean combination of polynomial inequalities. The `.wl` file defines one association:
+A semialgebraic set: a list of variables, polynomial equations `= 0`, and a boolean
+combination of polynomial inequalities, written as JSON with SymPy-readable strings:
 
 | Key | Content |
 |---|---|
-| `Parameters`, `Assumptions` | symbolic parameters and what the file assumes about them |
-| `Variables` | the coordinates of the space |
-| `Equations` | `p == 0` for each polynomial (unit-circle and unit-quaternion relations included) |
-| `Inequalities` | `g >= 0` from joint ranges and cones |
-| `Constraints` | inequalities plus `no_overlap` conditions |
-| `Formula` | everything, one formula |
-| `Poses` | each body's 4×4 world pose as polynomials in the variables |
-| `Coordinates` | every joint's coordinates (cosine, sine, displacement) as polynomials, including joints that close loops |
-| `Shapes` | each body's solid as `Function[{x, y, z}, ...]` in body coordinates |
-
-How you might use it in Mathematica (not run here, since this machine has no Mathematica):
-
-```mathematica
-Get["fourbar.wl"];
-GroebnerBasis[cspace["Equations"], cspace["Variables"]]
-Eliminate[cspace["Equations"], {cKnee, sKnee, cElbow, sElbow}]     (* crank angle vs parameters *)
-Reduce[cspace["Formula"] && cspace["Assumptions"], cspace["Variables"], Reals]
-Resolve[cspace["Constraints"], Reals]                             (* removes ForAll from no_overlap *)
-cspace["Poses"]["coupler"] . {b/2, 1, 0, 1}                        (* a coupler point, for its curve *)
-```
+| `parameters`, `assumptions` | symbolic parameters and what the file assumes about them |
+| `variables` | the coordinates of the space |
+| `equations` | each polynomial that must vanish (unit-circle and unit-quaternion relations included) |
+| `inequalities` | each `g` with `g >= 0`, from joint ranges and cones |
+| `formulas` | `no_overlap` conditions |
+| `poses` | each body's 4×4 world pose as polynomials in the variables |
+| `coordinates` | every joint's coordinates (cosine, sine, displacement) as polynomials, including joints that close loops |
+| `shapes` | each body's solid as a predicate in body coordinates `x, y, z` |
 
 The `--check` diagnostic samples real points numerically. At each point it reports the
 number of variables minus the rank of the Jacobian, which is the local dimension at
@@ -68,6 +55,15 @@ claims:
 
 `always: F` means F holds in every configuration. `possible: F` means F holds in at least
 one configuration. Both are checked for every parameter value that satisfies `assume:`.
+
+Two per-claim options:
+- `assume: "a <= b and ..."` adds conditions on the parameters for this claim only.
+- `given: [joint, ...]` (for `possible` claims) means: for every value of these joints'
+  coordinates allowed by their own limits, some configuration exists that also satisfies
+  F. For example, `given: [crank]` with `possible: "True"` says the crank can turn through
+  its whole range. This puts a second quantifier in front of the configuration, so it is
+  much harder for the solver. It works for small or open systems; on closed loops such as
+  the four-bar it times out.
 
 Each claim gets one of four answers. All of them come from z3, an automatic theorem prover
 with an exact decision procedure for polynomial arithmetic over the reals.
@@ -166,8 +162,8 @@ constraints:
 ```
 
 All numbers are exact: `0.1` means 1/10, `pi/3` stays symbolic. A reference is `body.frame`
-or `body`, which means the body's own frame. Names are letters and digits. `x`, `y`, `z`
-and Mathematica's one-letter built-ins (`C D E I K N O`) are reserved.
+or `body`, which means the body's own frame. Names are letters and digits. `x`, `y`, `z`,
+`pi`, `sqrt`, `sin`, `cos` and `tan` are reserved.
 
 ### Pairwise constraints
 
@@ -226,8 +222,8 @@ Any node may carry `at`, `z`, `x`.
 `no_overlap: [A, B]` means no point is interior to both bodies:
 - Unions of boxes, hulls and balls give an exact quantifier-free formula: separating
   axes for polytope pairs, centre distance for ball pairs.
-- Anything else, including a ball against a polytope, gives an exact
-  `ForAll[{x, y, z}, …]` for `Resolve`.
+- Anything else, including a ball against a polytope, gives an exact condition
+  quantified over all points, which the prover handles directly.
 
 ## Examples
 

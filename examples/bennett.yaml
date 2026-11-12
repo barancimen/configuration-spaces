@@ -21,3 +21,7 @@ constraints:
     name: h3
   - revolute: [l4.q, world.p]
     name: h4
+
+claims:
+  - name: oppositeHingesMirror     # about a minute; the other opposite-angle relations time out
+    always: "h2.s == -h4.s"

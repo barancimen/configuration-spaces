@@ -1,8 +1,8 @@
 # A fixed cube, a second cube sliding along the x axis through it, and a bead (ball) sliding
 # on a parallel rail that grazes the cube. no_overlap keeps the solids apart:
 #   cube/slider: an exact quantifier-free condition, equivalent to |s| >= 2
-#   cube/bead:   a ball against a box, emitted as ForAll[{x, y, z}, ...];
-#                Resolve turns it into |b| >= 1 + sqrt(3)/4
+#   cube/bead:   a ball against a box, a condition quantified over points,
+#                equivalent to |b| >= 1 + sqrt(3)/4
 name: sliding_boxes
 bodies:
   world:

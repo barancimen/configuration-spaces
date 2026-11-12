@@ -143,3 +143,21 @@ def test_independent_groups_are_exact(tmp_path):
     assert {n: r.status for n, r in res.items()} == {"inRange": "proved", "atTop": "proved",
                                                        "belowZero": "refuted"}
     assert all(r.detail.startswith("exact") for r in res.values())
+
+
+def test_given_and_per_claim_assumptions():
+    gears = run(EXAMPLES / "gears.yaml", [
+        {"name": "everyWheelAngle", "given": ["w"], "possible": "True"},
+        {"name": "pinionPastHalfTurn", "given": ["w"], "possible": "p.c >= 0"},   # false for some w
+    ], timeout=30)
+    assert gears["everyWheelAngle"].status == "proved"
+    assert gears["pinionPastHalfTurn"].status == "refuted"
+    assert "w.c" in gears["pinionPastHalfTurn"].model        # the wheel angle that fails
+    rods = run(EXAMPLES / "two_rods.yaml", [
+        {"name": "equalArms", "assume": "l1 == l2", "always": "dist2(pos(rod2.b), [0, 0, 0]) >= 2*l1^2"},
+        {"name": "anyArms", "always": "dist2(pos(rod2.b), [0, 0, 0]) >= 2*l1^2"},
+    ], timeout=30)
+    assert rods["equalArms"].status == "proved"
+    assert rods["anyArms"].status == "refuted"
+    with pytest.raises(Exception):
+        read_claims([{"always": "True", "given": ["w"]}])
