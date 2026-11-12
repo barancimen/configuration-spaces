@@ -10,10 +10,10 @@ Two bodies do not overlap when no point is interior to both.
 from dataclasses import dataclass
 
 import numpy as np
-from sympy import (And, Basic, Eq, Ge, Gt, Le, Lt, Matrix, Ne, Or, Symbol, Tuple, expand,
-                   false, true, zeros)
+from sympy import And, Eq, Ge, Gt, Le, Lt, Matrix, Ne, Or, Symbol, expand, false, true, zeros
 from sympy.core.relational import Relational
-from sympy.logic.boolalg import Boolean
+
+from .logic import ForAll
 
 from .se3 import inv
 from .spec import SpecError
@@ -22,23 +22,6 @@ X, Y, Z = (Symbol(n, real=True) for n in "xyz")
 P = Matrix([X, Y, Z])
 LEAVES = ("box", "ball", "cylinder", "hull", "where")
 NODES = ("union", "intersection", "difference")
-
-
-class ForAll(Boolean, Basic):
-    """ForAll[{x, y, z}, formula]: printed for Mathematica's Resolve; SymPy does not evaluate it."""
-
-    def __new__(cls, variables, formula):
-        return Basic.__new__(cls, Tuple(*variables), formula)
-
-    @property
-    def free_symbols(self):
-        return self.args[1].free_symbols - set(self.args[0])
-
-    def _mcode(self, printer):
-        return f"ForAll[{printer._print(self.args[0])}, {printer._print(self.args[1])}]"
-
-    def _sympystr(self, printer):
-        return f"ForAll({printer._print(self.args[0])}, {printer._print(self.args[1])})"
 
 
 # ---------- formulas ----------
@@ -304,26 +287,36 @@ def _separated(A, B, red):
     return ForAll((X, Y, Z), map_atoms(negate(both), lambda r: r.func(_tidy(r.lhs - r.rhs, red), 0))), False
 
 
-def no_overlap(spec, c, poses, red):
-    """Condition that bodies c.args = [A, B] do not overlap, in A's coordinates. Returns (formula, note)."""
-    if not isinstance(c.args, list) or len(c.args) != 2:
-        raise SpecError(f"no_overlap {c.name!r}: expected [body, body]")
-    a, b = (str(n) for n in c.args)
+def separation(spec, a, b, poses, red=None):
+    """Condition that the interiors of bodies a and b are disjoint, in a's coordinates.
+
+    Returns (formula, quantifier_free)."""
     for n in (a, b):
         if n not in spec.bodies or spec.bodies[n].shape is None:
-            raise SpecError(f"no_overlap {c.name!r}: body {n!r} has no shape")
-    M = red.matrix(inv(poses[a]) * poses[b])             # pose of B in A's coordinates
+            raise SpecError(f"body {n!r} has no shape")
+    f = red or expand
+    M = (inv(poses[a]) * poses[b]).applyfunc(f)          # pose of b in a's coordinates
     pa, pb = pieces(spec, spec.bodies[a].shape), pieces(spec, spec.bodies[b].shape)
     if pa is not None and pb is not None:
         pb = [q.moved(M, red) for q in pb]
         parts, exact = zip(*[_separated(p, q, red) for p in pa for q in pb])
-        note = None if all(exact) else (f"no_overlap {c.name!r}: some ball/polytope pairs use "
-                                        "ForAll[{x, y, z}, ...]; eliminate it with Resolve")
-        return And(*parts), note
+        return And(*parts), all(exact)
     _, open_a = predicates(spec, spec.bodies[a].shape)
     _, open_b = predicates(spec, spec.bodies[b].shape)
-    local = (inv(M) * Matrix([X, Y, Z, 1])).applyfunc(red)
-    both = And(open_a, at_point(open_b, local[:3], red))
-    f = ForAll((X, Y, Z), negate(both))
-    return f, (f"no_overlap {c.name!r}: the shapes are not unions of boxes, hulls and balls, so the "
-               "condition is ForAll[{x, y, z}, ...]; eliminate it with Resolve")
+    local = (inv(M) * Matrix([X, Y, Z, 1])).applyfunc(f)
+    return ForAll((X, Y, Z), negate(And(open_a, at_point(open_b, local[:3], red)))), False
+
+
+def no_overlap(spec, c, poses, red):
+    """The no_overlap constraint c. Returns (formula, note)."""
+    if not isinstance(c.args, list) or len(c.args) != 2:
+        raise SpecError(f"no_overlap {c.name!r}: expected [body, body]")
+    a, b = (str(n) for n in c.args)
+    try:
+        f, qf = separation(spec, a, b, poses, red)
+    except SpecError as err:
+        raise SpecError(f"no_overlap {c.name!r}: {err}")
+    note = None if qf else (f"no_overlap {c.name!r}: part of the condition is quantified "
+                            "(ForAll[{x, y, z}, ...]) because the shapes are not all boxes/hulls, "
+                            "or a ball meets a polytope")
+    return f, note

@@ -8,7 +8,8 @@ from scipy.spatial.transform import Rotation
 from sympy import And, Ge, Gt, Or, Symbol, lambdify, sqrt
 
 from cspace import build
-from cspace.shapes import ForAll, X, Y, Z, negate
+from cspace.logic import ForAll
+from cspace.shapes import X, Y, Z, negate
 from helpers import example, to_z3
 
 

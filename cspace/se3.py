@@ -52,6 +52,8 @@ def frame(at=(0, 0, 0), z=None, x=None):
 
     `x` defaults to the x axis of the surrounding frame, or its y axis when z is parallel to that.
     """
+    if z is None and x is None:          # the common case: a plain translation
+        return trans(*at)
     zv = _unit(Matrix(z if z is not None else [0, 0, 1]))
     if x is None:
         x = [1, 0, 0] if zv.cross(Matrix([1, 0, 0])) != Matrix([0, 0, 0]) else [0, 1, 0]

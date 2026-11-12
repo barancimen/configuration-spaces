@@ -1,0 +1,37 @@
+# A small cube (side a) sliding on the top face of a big cube (side A), without turning.
+# The slides stop where the small cube's edge reaches the face's edge, so it never hangs over.
+#   python3 -m cspace examples/cube_on_cube.yaml --prove
+name: cube_on_cube
+parameters: {A: symbolic, a: symbolic}
+assume: [a > 0, A > a]
+bodies:
+  base:
+    shape: {box: [A, A, A]}
+    frames: {top: {at: [0, 0, A/2], z: [1, 0, 0]}}
+  carriage:                    # shapeless helper: chains the x slide and the y slide
+    frames: {railX: {z: [1, 0, 0]}, railY: {z: [0, 1, 0]}}
+  slider:
+    shape: {box: [a, a, a]}
+    frames: {railY: {at: [0, 0, -a/2], z: [0, 1, 0]}}
+constraints:
+  - fixed: [world, base]
+  - prismatic: [base.top, carriage.railX]
+    name: slideX
+    range: [-(A - a)/2, (A - a)/2]
+  - prismatic: [carriage.railY, slider.railY]
+    name: slideY
+    range: [-(A - a)/2, (A - a)/2]
+
+claims:
+  - name: neverConvex
+    always: not convex(base, slider)
+  - name: neverHangsOver            # every point of the small cube is above the top face
+    always: "forall(p, implies(inside(p, slider), inside([p.x, p.y, A/2], base)))"
+  - name: restsOnTop
+    always: pos(slider).z == A/2 + a/2
+  - name: neverOverlaps
+    always: not overlap(base, slider)
+  - name: cornerReachable
+    possible: slideX.d == (A - a)/2 and slideY.d == (A - a)/2
+  - name: staysLeft                 # false on purpose: the prover should refute it
+    always: slideX.d <= 0

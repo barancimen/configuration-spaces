@@ -35,9 +35,18 @@ def truthy(v):
 
 @dataclass
 class Body:
+    """A body. Its frames are parsed on first use, so huge files only pay for what is used."""
     name: str
-    frames: dict
+    raw_frames: dict
     shape: object = None
+    spec: object = field(default=None, repr=False)
+    _frames: dict = field(default=None, repr=False)
+
+    @property
+    def frames(self):
+        if self._frames is None:
+            self._frames = {fn: self.spec.placement(fd or {}) for fn, fd in self.raw_frames.items()}
+        return self._frames
 
 
 @dataclass
@@ -56,9 +65,20 @@ class Spec:
     assumptions: list = field(default_factory=list)
     bodies: dict = field(default_factory=dict)
     constraints: list = field(default_factory=list)
+    claims: list = field(default_factory=list)       # raw claim entries, for the prover
+    _cache: dict = field(default_factory=dict, repr=False)
 
     def num(self, v, extra=None):
         """Parse one scalar exactly. `extra` adds allowed names (used for shape coordinates)."""
+        key = (str(v), len(self.env))
+        if extra is None and key in self._cache:
+            return self._cache[key]
+        e = self._parse(v, extra)
+        if extra is None:
+            self._cache[key] = e
+        return e
+
+    def _parse(self, v, extra):
         names = {"pi": pi, "sqrt": sqrt, "sin": sin, "cos": cos, "tan": tan}
         names.update(self.env)
         names.update(extra or {})
@@ -132,11 +152,10 @@ def load(path, kinds, overrides=None):
     for bname, b in (raw.get("bodies") or {}).items():
         check_name(bname, "body")
         b = b or {}
-        frames = {check_name(fn, "frame"): spec.placement(fd or {})
-                  for fn, fd in (b.get("frames") or {}).items()}
+        frames = {check_name(fn, "frame"): fd for fn, fd in (b.get("frames") or {}).items()}
         if bname == "world" and "shape" in b:
             raise SpecError("the world body carries frames only; make a body and fix it to world")
-        spec.bodies[bname] = Body(bname, frames, b.get("shape"))
+        spec.bodies[bname] = Body(bname, frames, b.get("shape"), spec)
 
     for i, c in enumerate(raw.get("constraints") or [], 1):
         found = [k for k in c if k in kinds]
@@ -145,4 +164,5 @@ def load(path, kinds, overrides=None):
         kind = found[0]
         opts = {k: v for k, v in c.items() if k not in (kind, "name")}
         spec.constraints.append(Constraint(kind, c[kind], check_name(c.get("name", f"j{i}"), "constraint"), opts))
+    spec.claims = list(raw.get("claims") or [])
     return spec

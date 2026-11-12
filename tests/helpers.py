@@ -7,7 +7,7 @@ from sympy import (Add, And, Eq, Ge, Gt, Le, Lt, Mul, Ne, Or, Pow, Symbol, false
                    true)
 
 from cspace import build
-from cspace.shapes import ForAll
+from cspace.logic import ForAll
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 

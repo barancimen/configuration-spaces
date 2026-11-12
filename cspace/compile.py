@@ -45,6 +45,7 @@ class System:
     naive_dof: int
     coords: str
     trig: bool
+    red: object = None       # normal form modulo the circle/quaternion relations
 
     def formula(self):
         parts = [Eq(e, 0) for e in self.equations] + self.constraints_list()
@@ -68,6 +69,8 @@ class Reducer:
         self.rules.append((var, square))
 
     def __call__(self, e):
+        if e.is_Rational:                 # common for bodies held fixed: nothing to reduce
+            return e
         e = expand(e)
         for var, square in self.rules:
             if not e.has(var):
@@ -81,6 +84,8 @@ class Reducer:
         return e
 
     def matrix(self, M):
+        if all(e.is_Rational for e in M):
+            return M
         return M.applyfunc(self)
 
     def canon(self, e):
@@ -112,9 +117,11 @@ def _pair_joint(spec, c):
     return Joint(c.name, c.kind, a, Fa, b, Fb, opts)
 
 
-def compile_spec(spec, coords="reduced", trig=False):
+def compile_spec(spec, coords="reduced", trig=False, shapes=True):
     if coords not in ("reduced", "maximal"):
         raise SpecError(f"unknown coordinate choice {coords!r}")
+    for b in spec.bodies.values():       # frames are parsed lazily; check the ones compiled here
+        b.frames
     joints = [_pair_joint(spec, c) for c in spec.constraints if c.kind in KINDS]
     others = [c for c in spec.constraints if c.kind in OTHER_KINDS]
     names = [c.name for c in spec.constraints]
@@ -276,9 +283,9 @@ def compile_spec(spec, coords="reduced", trig=False):
             j.R, j.p = j.R.subs(angle_subs), j.p.subs(angle_subs)
 
     # ---- shapes ----
-    shapes = {}
+    want_shapes, shapes = shapes, {}
     for b in spec.bodies.values():
-        if b.shape is not None:
+        if want_shapes and b.shape is not None:
             from .shapes import body_predicate
             shapes[b.name] = body_predicate(spec, b)
 
@@ -292,4 +299,4 @@ def compile_spec(spec, coords="reduced", trig=False):
 
     return System(spec.name, list(spec.params), list(spec.assumptions), variables, eqs, ineqs,
                   formulas, {k: v for k, v in poses.items() if k != "world"}, shapes, joints,
-                  notes, naive, coords, trig)
+                  notes, naive, coords, trig, red)

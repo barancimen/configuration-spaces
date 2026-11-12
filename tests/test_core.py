@@ -8,7 +8,7 @@ from sympy.parsing.mathematica import parse_mathematica
 
 from cspace import SpecError, to_wl
 from cspace.compile import Reducer
-from cspace.shapes import ForAll
+from cspace.logic import ForAll
 from helpers import EXAMPLES, example
 
 ALL = sorted(p.stem for p in EXAMPLES.glob("*.yaml") if p.stem != "screw")
