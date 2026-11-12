@@ -1,0 +1,18 @@
+# Two meshing gears on fixed axles, 20 and 40 teeth. The wheel's hinge is limited to a
+# quarter turn either way. The coupling relates two joints, not two bodies.
+name: gears
+bodies:
+  world:
+    frames: {axle1: {}, axle2: {at: [3, 0, 0]}}
+  pinion:
+    frames: {hub: {}}
+  wheel:
+    frames: {hub: {}}
+constraints:
+  - revolute: [world.axle1, pinion.hub]
+    name: p
+  - revolute: [world.axle2, wheel.hub]
+    name: w
+    range: [-pi/2, pi/2]
+  - gear: [p, w]
+    teeth: [20, 40]

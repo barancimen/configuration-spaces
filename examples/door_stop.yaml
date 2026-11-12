@@ -1,0 +1,14 @@
+# A door leaf on a hinge, and a stop block fixed to the floor in its path.
+# no_overlap turns the circle of hinge angles into the arc the door can actually reach.
+name: door_stop
+bodies:
+  door:
+    shape: {box: [2, 1/10, 2], at: [1, 0, 0]}      # leaf from the hinge out to x = 2
+  stop:
+    shape: {box: [1/2, 1/2, 2], at: [1, 1, 0]}
+constraints:
+  - revolute: [world, door]
+    name: hinge
+  - fixed: [world, stop]
+  - no_overlap: [door, stop]
+    name: blocked

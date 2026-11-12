@@ -1,0 +1,18 @@
+# Two rods joined end to end by a hinge whose angle stays within [-pi/2, pi/2].
+# rod1 is fixed to the world; rod2 turns in the xy plane about rod1's far end.
+# (No no_overlap here: square-ended rods on a hinge overlap at every nonzero angle.)
+name: two_rods
+parameters: {l1: symbolic, l2: symbolic}
+assume: [l1 > 0, l2 > 0]
+bodies:
+  rod1:
+    shape: {box: [l1, 1/10, 1/10], at: [l1/2, 0, 0]}
+    frames: {a: {at: [0, 0, 0]}, b: {at: [l1, 0, 0]}}
+  rod2:
+    shape: {box: [l2, 1/10, 1/10], at: [l2/2, 0, 0]}
+    frames: {a: {at: [0, 0, 0]}, b: {at: [l2, 0, 0]}}
+constraints:
+  - fixed: [world, rod1.a]
+  - revolute: [rod1.b, rod2.a]     # hinge about the frames' z axis: motion in a plane
+    name: elbow
+    range: [-pi/2, pi/2]

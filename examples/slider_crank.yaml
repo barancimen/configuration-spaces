@@ -1,0 +1,23 @@
+# Slider-crank: crank of radius r, connecting rod of length l, slider on the world x axis.
+name: slider_crank
+parameters: {r: symbolic, l: symbolic}
+assume: [r > 0, l > r]
+bodies:
+  world:
+    frames: {o: {}, track: {z: [1, 0, 0]}}     # prismatic joints slide along their frame's z axis
+  crank:
+    frames: {base: {}, pin: {at: [r, 0, 0]}}
+  rod:
+    frames: {base: {}, pin: {at: [l, 0, 0]}}
+  slider:
+    frames: {rail: {z: [1, 0, 0]}, pin: {}}
+constraints:
+  - revolute: [world.o, crank.base]
+    name: crank
+  - revolute: [crank.pin, rod.base]
+    name: wrist
+  - prismatic: [world.track, slider.rail]
+    name: slide
+    range: [-5, 5]
+  - revolute: [rod.pin, slider.pin]
+    name: gudgeon

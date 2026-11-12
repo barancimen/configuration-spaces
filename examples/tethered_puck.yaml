@@ -1,0 +1,18 @@
+# A puck sliding on a table, kept upright, on a tether of length L from a post.
+# Only implicit constraints, so the puck gets free coordinates (position + unit quaternion)
+# and every constraint becomes an equation on them. Freedoms: around the post, and spin.
+name: tethered_puck
+parameters: {h: 1/2, L: 3}
+bodies:
+  world:
+    frames: {table: {at: [0, 0, h]}}
+  puck:
+    frames: {centre: {}}
+constraints:
+  - point_on_plane: [world.table, puck.centre]
+    name: onTable
+  - parallel: [world.table, puck.centre]
+    name: upright
+  - distance: [world.table, puck.centre]
+    name: tether
+    length: L

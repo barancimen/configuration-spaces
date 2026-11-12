@@ -1,0 +1,26 @@
+# RSSR spatial linkage: crank and rocker on hinges with skew axes, joined by a coupler with
+# ball joints at both ends. Two freedoms: the useful one, plus the coupler's idle spin about
+# the line through its ball centres (joint counting gives 6*3 - 5 - 3 - 3 - 5 = 2 as well).
+name: rssr
+parameters: {r: 1, l: 4, k: 2}
+bodies:
+  world:
+    frames:
+      crankAxis: {}
+      rockerAxis: {at: [3, 1, 1], z: [1, 0, 0]}
+  crank:
+    frames: {axis: {}, ball: {at: [r, 0, 0]}}
+  coupler:
+    frames: {a: {}, b: {at: [l, 0, 0]}}
+  rocker:
+    frames: {axis: {}, ball: {at: [k, 0, 0]}}
+constraints:
+  - revolute: [world.crankAxis, crank.axis]
+    name: crank
+  - spherical: [crank.ball, coupler.a]
+    name: ballA
+    cone: pi/2            # the coupler stays within 90 degrees of the crank pin's axis
+  - revolute: [world.rockerAxis, rocker.axis]
+    name: rocker
+  - spherical: [coupler.b, rocker.ball]
+    name: ballB

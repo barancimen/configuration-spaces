@@ -1,0 +1,23 @@
+# Bennett linkage: a spatial loop of four hinges that moves although joint counting says it
+# cannot (6*3 - 5*4 = -2). Opposite links are equal, with a / sin(alpha) = b / sin(beta):
+# here 13 / (4/5) = 15 / (12/13).
+# Each link carries a hinge axis at its origin (z) and one at (length, 0, 0), twisted about x.
+name: bennett
+bodies:
+  world:                                    # the ground link (a, alpha)
+    frames: {p: {}, q: {at: [13, 0, 0], z: [0, -4/5, 3/5]}}
+  l2:                                       # (b, beta)
+    frames: {p: {}, q: {at: [15, 0, 0], z: [0, -12/13, 5/13]}}
+  l3:                                       # (a, alpha)
+    frames: {p: {}, q: {at: [13, 0, 0], z: [0, -4/5, 3/5]}}
+  l4:                                       # (b, beta)
+    frames: {p: {}, q: {at: [15, 0, 0], z: [0, -12/13, 5/13]}}
+constraints:
+  - revolute: [world.q, l2.p]
+    name: h1
+  - revolute: [l2.q, l3.p]
+    name: h2
+  - revolute: [l3.q, l4.p]
+    name: h3
+  - revolute: [l4.q, world.p]
+    name: h4

@@ -1,0 +1,22 @@
+# Planar four-bar: crank a, coupler b, rocker c, ground d. One loop, one freedom.
+name: fourbar
+parameters: {a: symbolic, b: symbolic, c: symbolic, d: symbolic}
+assume: [a > 0, b > 0, c > 0, d > 0]
+bodies:
+  world:
+    frames: {o: {}, p: {at: [d, 0, 0]}}
+  crank:
+    frames: {base: {}, tip: {at: [a, 0, 0]}}
+  coupler:
+    frames: {base: {}, tip: {at: [b, 0, 0]}}
+  rocker:
+    frames: {base: {}, tip: {at: [c, 0, 0]}}
+constraints:
+  - revolute: [world.o, crank.base]
+    name: crank
+  - revolute: [crank.tip, coupler.base]
+    name: knee
+  - revolute: [coupler.tip, rocker.base]
+    name: elbow
+  - revolute: [rocker.tip, world.p]      # closes the loop
+    name: ground

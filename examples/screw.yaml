@@ -1,0 +1,18 @@
+# Lead screw: turning the screw by one full turn moves the nut by one pitch along the axis.
+# An angle tied to a length is a helix, which is not algebraic, so this needs --trig:
+#   python3 -m cspace examples/screw.yaml --trig
+# Without --trig the compiler stops with an explanation.
+name: screw
+parameters: {pitch: symbolic}
+bodies:
+  screw:
+    frames: {axis: {}}
+  nut:
+    frames: {axis: {}}
+constraints:
+  - revolute: [world, screw.axis]
+    name: drive
+    range: [0, 10*pi]     # five turns; only expressible with --trig
+  - prismatic: [world, nut.axis]
+    name: feed
+  - couple: {feed: 1, drive: -pitch/(2*pi)}

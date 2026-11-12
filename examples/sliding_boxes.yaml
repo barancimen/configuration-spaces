@@ -1,0 +1,27 @@
+# A fixed cube, a second cube sliding along the x axis through it, and a bead (ball) sliding
+# on a parallel rail that grazes the cube. no_overlap keeps the solids apart:
+#   cube/slider: an exact quantifier-free condition, equivalent to |s| >= 2
+#   cube/bead:   a ball against a box, emitted as ForAll[{x, y, z}, ...];
+#                Resolve turns it into |b| >= 1 + sqrt(3)/4
+name: sliding_boxes
+bodies:
+  world:
+    frames: {rail: {z: [1, 0, 0]}, rail2: {at: [0, 5/4, 0], z: [1, 0, 0]}}
+  cube:
+    shape: {box: [2, 2, 2]}
+  slider:
+    shape: {box: [2, 2, 2]}
+    frames: {rail: {z: [1, 0, 0]}}
+  bead:
+    shape: {ball: 1/2}
+    frames: {rail: {z: [1, 0, 0]}}
+constraints:
+  - fixed: [world, cube]
+  - prismatic: [world.rail, slider.rail]
+    name: s
+  - prismatic: [world.rail2, bead.rail]
+    name: b
+  - no_overlap: [cube, slider]
+    name: apart
+  - no_overlap: [cube, bead]
+    name: clear
