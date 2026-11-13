@@ -37,7 +37,7 @@
 html, body { height: 100%; }
 body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; }
 .app {
-  height: 100%; box-sizing: border-box; display: grid; gap: 16px;
+  height: 100%; min-height: 560px; box-sizing: border-box; display: grid; gap: 16px;
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   padding-block: 16px;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -78,8 +78,9 @@ td:first-child { color: var(--muted); padding-right: 10px; white-space: nowrap; 
 td:last-child { font-family: var(--font-data); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
 .warn { color: var(--bad); font-size: 0.8rem; margin: 0; }
-.stage { position: relative; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--stage); }
-.stage canvas { display: block; width: 100%; height: 100%; }
+.stage { position: relative; min-width: 0; min-height: 360px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--stage); }
+.stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.error { position: absolute; inset: 12px 12px auto 12px; margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--panel); color: var(--bad); border: 1px solid var(--bad); font-size: 0.85rem; }
 .hud { position: absolute; left: 12px; bottom: 10px; font-family: var(--font-data); font-size: 0.75rem; color: var(--muted); pointer-events: none; }
 kbd { font-family: var(--font-data); font-size: 0.72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 @media (max-width: 760px) {
@@ -133,12 +134,10 @@ kbd { font-family: var(--font-data); font-size: 0.72rem; border: 1px solid var(-
 
   <main class="stage" id="stage">
     <canvas id="view" aria-label="3D view of the mechanism"></canvas>
-    <div class="hud">drag to orbit · scroll to zoom · right-drag to pan</div>
+    <p class="error" id="error" role="alert" hidden></p>
+    <div class="hud">drag to turn · scroll to zoom · shift-drag to pan · double-click to refit</div>
   </main>
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <script id="cspace-math">
 var CSPACE = (function () {
@@ -274,77 +273,159 @@ var CSPACE = (function () {
 
 <script>
 (function () {
-  const { SYSTEMS, globalSample, localSample, freedoms } = CSPACE;
   const $ = id => document.getElementById(id);
+  // Any error is shown on the page itself, so a failure is never just a blank area.
+  function showError(msg) {
+    const box = $("error");
+    box.hidden = false;
+    box.textContent = "Something went wrong while drawing: " + msg;
+  }
+  window.addEventListener("error", e => showError(e.message || String(e.error)));
+  if (typeof CSPACE === "undefined") { showError("the mechanism data did not load."); return; }
+
+  const { SYSTEMS, globalSample, localSample, freedoms } = CSPACE;
   const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const PART_COLORS = ["#3f6f9f", "#8d3d4a", "#3f8a78", "#6c5c9e", "#a3592e", "#5b7f2e", "#2e7f9b", "#7d6f4e"];
 
-  if (typeof THREE === "undefined") {
-    $("status").innerHTML = '<span class="chip bad">The 3D library did not load</span>';
-    return;
+  // ---------- small vector and matrix helpers (4x4 matrices are row-major arrays of 16) ----------
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = a => { const l = Math.hypot(...a) || 1; return a.map(v => v / l); };
+  const apply = (m, p) => [m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3], m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7], m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11]];
+  const turn = (m, v) => [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[4] * v[0] + m[5] * v[1] + m[6] * v[2], m[8] * v[0] + m[9] * v[1] + m[10] * v[2]];
+  const I4 = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  function rgb(hex) { const n = parseInt(hex.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  const shade = (c, k, a = 1) => `rgba(${c.map(v => Math.round(Math.min(255, v * k))).join(",")},${a})`;
+
+  // ---------- solids as faces in body coordinates ----------
+  function boxFaces(size, m) {
+    const [hx, hy, hz] = size.map(v => Math.abs(v) / 2), out = [];
+    const quads = [[[1, 0, 0], [[1, -1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1]]], [[-1, 0, 0], [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1]]],
+                   [[0, 1, 0], [[-1, 1, -1], [-1, 1, 1], [1, 1, 1], [1, 1, -1]]], [[0, -1, 0], [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]]],
+                   [[0, 0, 1], [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]], [[0, 0, -1], [[-1, -1, -1], [-1, 1, -1], [1, 1, -1], [1, -1, -1]]]];
+    for (const [n, pts] of quads) out.push({ n: turn(m, n), pts: pts.map(p => apply(m, [p[0] * hx, p[1] * hy, p[2] * hz])), cull: true });
+    return out;
+  }
+  function cylFaces(r, h, m, k = 28) {
+    const out = [], ring = z => Array.from({ length: k }, (_, i) => [r * Math.cos(2 * Math.PI * i / k), r * Math.sin(2 * Math.PI * i / k), z]);
+    const top = ring(h / 2), bot = ring(-h / 2);
+    out.push({ n: turn(m, [0, 0, 1]), pts: top.map(p => apply(m, p)), cull: true });
+    out.push({ n: turn(m, [0, 0, -1]), pts: bot.slice().reverse().map(p => apply(m, p)), cull: true });
+    for (let i = 0; i < k; i++) {
+      const j = (i + 1) % k, a = 2 * Math.PI * (i + 0.5) / k;
+      out.push({ n: turn(m, [Math.cos(a), Math.sin(a), 0]), pts: [bot[i], bot[j], top[j], top[i]].map(p => apply(m, p)), cull: true });
+    }
+    return out;
+  }
+  function meshFaces(tris, m) {
+    const out = [];
+    for (let i = 0; i < tris.length; i += 9) {
+      const pts = [0, 3, 6].map(o => apply(m, [tris[i + o], tris[i + o + 1], tris[i + o + 2]]));
+      out.push({ n: unit(cross(sub(pts[1], pts[0]), sub(pts[2], pts[0]))), pts, cull: false });
+    }
+    return out;
   }
 
-  // ---------- three.js stage ----------
-  const canvas = $("view"), stage = $("stage");
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
-  camera.up.set(0, 0, 1);
-  const controls = new THREE.OrbitControls(camera, canvas);
-  controls.enableDamping = true;
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.85));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.75);
-  sun.position.set(3, -4, 6);
-  scene.add(sun);
-  let grid = null, root = new THREE.Group();
-  scene.add(root);
-
-  function applyTheme() {
-    scene.background = new THREE.Color(css("--stage"));
-    if (grid) { root.remove(grid); grid.geometry.dispose(); }
-    const size = state.scale * 4;
-    grid = new THREE.GridHelper(size, 20, new THREE.Color(css("--grid-strong")), new THREE.Color(css("--grid")));
-    grid.rotation.x = Math.PI / 2;
-    root.add(grid);
+  // ---------- the stage: an orthographic camera drawn with the 2D canvas ----------
+  const canvas = $("view"), stage = $("stage"), ctx = canvas.getContext("2d");
+  const view = { yaw: -1.13, pitch: 0.6, zoom: 1, pan: [0, 0], center: [0, 0, 0], radius: 1 };
+  let dirty = true;
+  const redraw = () => { dirty = true; };
+  function camera() {
+    const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch), cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+    const d = [cp * cy, cp * sy, sp], r = unit([-sy, cy, 0]), u = cross(d, r);
+    const W = canvas.width, H = canvas.height, s = view.zoom * Math.min(W, H) / (2.3 * view.radius);
+    return { d, r, u, s, W, H, project(p) { const q = sub(p, view.center); return [W / 2 + dot(q, r) * s + view.pan[0], H / 2 - dot(q, u) * s + view.pan[1], dot(q, d)]; } };
   }
   function resize() {
-    const w = stage.clientWidth, h = stage.clientHeight;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(h, 1);
-    camera.updateProjectionMatrix();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.round(stage.clientWidth * dpr));
+    canvas.height = Math.max(1, Math.round(stage.clientHeight * dpr));
+    redraw();
   }
   new ResizeObserver(resize).observe(stage);
-  (function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
 
-  // ---------- state ----------
-  const state = { sys: null, p: [], x: null, scale: 1, groups: {}, samples: 0, walk: null };
+  const state = { sys: null, p: [], x: null, scale: 1, bodies: [], samples: 0, walk: null, framed: false };
 
-  function material(color, flag) {
-    return new THREE.MeshStandardMaterial({
-      color, metalness: 0.25, roughness: 0.55, flatShading: true, side: THREE.DoubleSide,
-      transparent: flag === "ghost", opacity: flag === "ghost" ? 0.3 : 1,
-    });
+  function draw() {
+    const cam = camera(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+    ctx.fillStyle = css("--stage");
+    ctx.fillRect(0, 0, cam.W, cam.H);
+    // floor grid in the xy plane
+    const L = state.scale * 2, step = state.scale / 5;
+    ctx.lineWidth = 1 * dpr;
+    for (let v = -L; v <= L + 1e-9; v += step) {
+      ctx.strokeStyle = Math.abs(v) < 1e-9 ? css("--grid-strong") : css("--grid");
+      for (const [a, b] of [[[v, -L, 0], [v, L, 0]], [[-L, v, 0], [L, v, 0]]]) {
+        const A = cam.project(a), B = cam.project(b);
+        ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+      }
+    }
+    if (!state.x) return;
+    const poses = state.sys.poses(state.x, state.p), items = [];
+    const light = unit([0.35, -0.5, 0.8]);
+    for (const b of state.bodies) {
+      const P = b.name === "world" ? I4 : (poses[b.name] || I4);
+      for (const f of b.faces) {
+        let n = turn(P, f.n);
+        if (f.cull && dot(n, cam.d) <= 0) continue;
+        if (!f.cull && dot(n, cam.d) < 0) n = n.map(v => -v);
+        const pts = f.pts.map(p => cam.project(apply(P, p)));
+        const depth = pts.reduce((s, p) => s + p[2], 0) / pts.length;
+        items.push({ depth, kind: "face", pts, fill: shade(b.color, 0.55 + 0.5 * Math.max(0, dot(n, light)), b.alpha) });
+      }
+      for (const s of b.balls) {
+        const c = cam.project(apply(P, s.c));
+        items.push({ depth: c[2], kind: "ball", c, r: s.r * cam.s, color: b.color, alpha: b.alpha });
+      }
+      for (const [a, c] of b.rods) {
+        const A = cam.project(apply(P, a)), C = cam.project(apply(P, c));
+        items.push({ depth: (A[2] + C[2]) / 2, kind: "rod", A, C, w: Math.max(3 * dpr, state.scale * 0.024 * cam.s), color: shade(b.color, 1) });
+      }
+      for (const m of b.markers) {
+        const c = cam.project(apply(P, m));
+        items.push({ depth: c[2] + 1e-6, kind: "marker", c, r: Math.max(3.5 * dpr, state.scale * 0.024 * cam.s), color: b.markerColor });
+      }
+    }
+    items.sort((a, b) => a.depth - b.depth);
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const it of items) {
+      if (it.kind === "face") {
+        ctx.beginPath(); ctx.moveTo(it.pts[0][0], it.pts[0][1]);
+        for (const p of it.pts.slice(1)) ctx.lineTo(p[0], p[1]);
+        ctx.closePath(); ctx.fillStyle = it.fill; ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.18)"; ctx.lineWidth = 0.8 * dpr; ctx.stroke();
+      } else if (it.kind === "ball") {
+        const g = ctx.createRadialGradient(it.c[0] - it.r * 0.35, it.c[1] - it.r * 0.35, it.r * 0.1, it.c[0], it.c[1], it.r);
+        g.addColorStop(0, shade(it.color, 1.35, it.alpha)); g.addColorStop(1, shade(it.color, 0.6, it.alpha));
+        ctx.beginPath(); ctx.arc(it.c[0], it.c[1], Math.max(it.r, 1), 0, 2 * Math.PI); ctx.fillStyle = g; ctx.fill();
+      } else if (it.kind === "rod") {
+        ctx.beginPath(); ctx.moveTo(it.A[0], it.A[1]); ctx.lineTo(it.C[0], it.C[1]);
+        ctx.strokeStyle = it.color; ctx.lineWidth = it.w; ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.arc(it.c[0], it.c[1], it.r, 0, 2 * Math.PI);
+        ctx.fillStyle = it.color; ctx.fill(); ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1 * dpr; ctx.stroke();
+      }
+    }
   }
-  function primMesh(pr, color) {
-    let g;
-    if (pr.type === "box") g = new THREE.BoxGeometry(...pr.size.map(v => Math.max(Math.abs(v), 1e-4)));
-    else if (pr.type === "ball") g = new THREE.SphereGeometry(Math.abs(pr.r), 32, 16);
-    else if (pr.type === "cylinder") { g = new THREE.CylinderGeometry(Math.abs(pr.r), Math.abs(pr.r), Math.abs(pr.h), 40); g.rotateX(Math.PI / 2); }
-    else { g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pr.tris, 3)); g.computeVertexNormals(); }
-    const mesh = new THREE.Mesh(g, material(color, pr.flag));
-    mesh.matrixAutoUpdate = false;
-    mesh.matrix.set(...pr.m);
-    return mesh;
-  }
-  function rod(a, b, radius, color) {
-    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), len = A.distanceTo(B);
-    if (len < 1e-9) return null;
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 16), material(color));
-    mesh.position.copy(A).add(B).multiplyScalar(0.5);
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
-    return mesh;
-  }
+  (function loop() { if (dirty) { dirty = false; draw(); } requestAnimationFrame(loop); })();
+
+  // orbit, pan and zoom
+  let drag = null;
+  canvas.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 2 }; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.pan) { view.pan[0] += dx * dpr; view.pan[1] += dy * dpr; }
+    else { view.yaw -= dx * 0.01; view.pitch = Math.max(-1.55, Math.min(1.55, view.pitch + dy * 0.01)); }
+    redraw();
+  });
+  canvas.addEventListener("pointerup", () => { drag = null; });
+  canvas.addEventListener("contextmenu", e => e.preventDefault());
+  canvas.addEventListener("wheel", e => { e.preventDefault(); view.zoom *= Math.exp(-e.deltaY * 0.0015); redraw(); }, { passive: false });
+  canvas.addEventListener("dblclick", () => frameMechanism());
 
   function sceneScale(bodies) {
     let m = 0;
@@ -360,70 +441,51 @@ var CSPACE = (function () {
   }
 
   function build() {
-    const sys = state.sys;
-    scene.remove(root);
-    root = new THREE.Group();
-    scene.add(root);
-    grid = null;
-    const bodies = sys.geometry(state.p);
-    state.scale = sceneScale(bodies);
-    state.groups = {};
-    const markerR = state.scale * 0.022, rodR = state.scale * 0.012;
-    const brass = new THREE.Color(css("--accent"));
+    const geo = state.sys.geometry(state.p);
+    state.scale = sceneScale(geo);
+    const brass = css("--accent"), muted = css("--muted");
     let i = 0;
-    for (const b of bodies) {
-      const g = new THREE.Group();
-      g.matrixAutoUpdate = false;
+    state.bodies = geo.map(b => {
       const isWorld = b.name === "world";
-      const color = isWorld ? new THREE.Color(css("--muted")) : new THREE.Color(PART_COLORS[i++ % PART_COLORS.length]);
-      for (const pr of b.prims) g.add(primMesh(pr, color));
+      const color = rgb(isWorld ? muted : PART_COLORS[i++ % PART_COLORS.length]);
+      const body = { name: b.name, color, alpha: 1, faces: [], balls: [], rods: [], markers: b.frames, markerColor: isWorld ? muted : brass };
+      for (const pr of b.prims) {
+        if (pr.flag === "ghost") body.alpha = 0.35;
+        if (pr.type === "box") body.faces.push(...boxFaces(pr.size, pr.m));
+        else if (pr.type === "cylinder") body.faces.push(...cylFaces(Math.abs(pr.r), Math.abs(pr.h), pr.m));
+        else if (pr.type === "mesh") body.faces.push(...meshFaces(pr.tris, pr.m));
+        else if (pr.type === "ball") body.balls.push({ c: [pr.m[3], pr.m[7], pr.m[11]], r: Math.abs(pr.r) });
+      }
       if (!b.prims.length && !isWorld) {
         const pts = b.frames.length > 1 ? b.frames : [[0, 0, 0]].concat(b.frames);
-        for (let k = 0; k + 1 < pts.length; k++) { const r = rod(pts[k], pts[k + 1], rodR, color); if (r) g.add(r); }
+        for (let k = 0; k + 1 < pts.length; k++) body.rods.push([pts[k], pts[k + 1]]);
       }
-      for (const f of b.frames) {
-        const s = new THREE.Mesh(new THREE.SphereGeometry(markerR, 16, 10), material(isWorld ? color : brass));
-        s.position.set(...f);
-        g.add(s);
-      }
-      root.add(g);
-      state.groups[b.name] = g;
-    }
-    if (!state.groups.world) {
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(new THREE.SphereGeometry(markerR, 16, 10), material(new THREE.Color(css("--muted")))));
-      root.add(g);
-    }
-    applyTheme();
+      return body;
+    });
+    if (!state.bodies.some(b => b.name === "world"))
+      state.bodies.push({ name: "world", color: rgb(muted), alpha: 1, faces: [], balls: [], rods: [], markers: [[0, 0, 0]], markerColor: muted });
     state.framed = false;
-    frameView(new THREE.Box3(new THREE.Vector3(-state.scale, -state.scale, 0), new THREE.Vector3(state.scale, state.scale, 0)));
+    view.center = [0, 0, 0]; view.radius = state.scale; view.zoom = 1; view.pan = [0, 0];
+    redraw();
   }
 
-  // Aim the camera at a box, from above and in front (z is up).
-  function frameView(box) {
-    const c = box.getCenter(new THREE.Vector3()), r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, state.scale * 0.3);
-    const d = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.05;
-    camera.position.set(c.x + d * 0.35, c.y - d * 0.75, c.z + d * 0.56);
-    camera.near = d / 200; camera.far = d * 50; camera.updateProjectionMatrix();
-    controls.target.copy(c);
-    controls.update();
-  }
+  // Fit the view to the mechanism at its current pose.
   function frameMechanism() {
-    root.updateMatrixWorld(true);
-    const box = new THREE.Box3();
-    for (const [name, g] of Object.entries(state.groups)) if (name !== "world" || g.children.length) box.expandByObject(g);
-    if (!box.isEmpty()) frameView(box);
-    state.framed = true;
-  }
-
-  function show(x) {
-    state.x = x;
-    const poses = state.sys.poses(x, state.p);
-    for (const [name, g] of Object.entries(state.groups)) {
-      const m = poses[name];
-      if (m) g.matrix.set(...m); else g.matrix.identity();
+    if (!state.x) return;
+    const poses = state.sys.poses(state.x, state.p), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const add = p => p.forEach((v, k) => { lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); });
+    for (const b of state.bodies) {
+      const P = b.name === "world" ? I4 : (poses[b.name] || I4);
+      b.markers.forEach(m => add(apply(P, m)));
+      b.faces.forEach(f => f.pts.forEach(p => add(apply(P, p))));
+      b.balls.forEach(s => { const c = apply(P, s.c); add(c.map(v => v - s.r)); add(c.map(v => v + s.r)); });
     }
-    readout();
+    if (!Number.isFinite(lo[0])) return;
+    view.center = lo.map((v, k) => (v + hi[k]) / 2);
+    view.radius = Math.max(Math.hypot(...sub(hi, lo)) / 2, state.scale * 0.3);
+    view.zoom = 1; view.pan = [0, 0];
+    state.framed = true;
+    redraw();
   }
 
   // ---------- panel ----------
@@ -443,12 +505,11 @@ var CSPACE = (function () {
     $("readout").innerHTML = rows.join("") || '<tr><td>No joint coordinates</td><td></td></tr>';
   }
   function setStatus(res, what) {
-    const sys = state.sys;
     if (!res.ok) {
       $("status").innerHTML = `<span class="chip bad">${what === "local" ? "No nearby pose found" : "No pose found"}</span><span>${res.tries || 0} tries · still showing the last valid pose</span>`;
       return;
     }
-    const free = freedoms(sys, res.x, state.p);
+    const free = freedoms(state.sys, res.x, state.p);
     const bits = [`residual ${res.maxF.toExponential(1)}`, `${free} ${free === 1 ? "freedom" : "freedoms"} here`,
                   `found in ${res.tries} ${res.tries === 1 ? "try" : "tries"}`, `sample ${state.samples}`];
     $("status").innerHTML = `<span class="chip ok">Valid pose</span><span>${bits.join(" · ")}</span>`;
@@ -458,7 +519,11 @@ var CSPACE = (function () {
     const res = kind === "local" && state.x
       ? localSample(sys, state.x, state.p, +$("step").value, state.scale)
       : globalSample(sys, state.p, state.scale);
-    if (res.ok) { state.samples++; show(res.x); if (!state.framed) frameMechanism(); }
+    if (res.ok) {
+      state.samples++; state.x = res.x; readout();
+      if (!state.framed) frameMechanism();
+      redraw();
+    }
     setStatus(res, kind);
     return res.ok;
   }
@@ -474,22 +539,19 @@ var CSPACE = (function () {
     let fails = 0;
     state.walk = setInterval(() => { fails = sample("local") ? 0 : fails + 1; if (fails >= 6) stopWalk(); }, 70);
   }
-
   function renderParams() {
     const sys = state.sys, box = $("params");
     box.innerHTML = "";
     $("paramGroup").hidden = !sys.params.length;
     sys.params.forEach((q, i) => {
-      const id = `param-${i}`;
-      const label = document.createElement("label");
+      const id = `param-${i}`, label = document.createElement("label");
       label.setAttribute("for", id);
       label.innerHTML = `${q.name}<input id="${id}" type="number" step="0.1" value="${state.p[i]}">`;
       label.querySelector("input").addEventListener("change", e => {
         const v = parseFloat(e.target.value);
         if (!Number.isFinite(v)) return;
         state.p[i] = v;
-        checkParams();
-        stopWalk(); build(); state.x = null; sample("global");
+        checkParams(); stopWalk(); state.x = null; build(); sample("global");
       });
       box.appendChild(label);
     });
@@ -505,7 +567,6 @@ var CSPACE = (function () {
     $("notesGroup").hidden = !notes.length;
     $("notes").innerHTML = notes.map(n => `<li>${n.replace(/[<&]/g, c => (c === "<" ? "&lt;" : "&amp;"))}</li>`).join("");
   }
-
   function selectSystem(i) {
     stopWalk();
     state.sys = SYSTEMS[i];
@@ -532,8 +593,8 @@ var CSPACE = (function () {
     if (k === "g") sample("global"); else if (k === "l") sample("local"); else if (k === "w") toggleWalk();
   });
   const schemes = window.matchMedia("(prefers-color-scheme: dark)");
-  const retheme = () => { if (state.sys) { applyTheme(); } };
-  schemes.addEventListener && schemes.addEventListener("change", retheme);
+  const retheme = () => { if (state.sys) build(); };
+  if (schemes.addEventListener) schemes.addEventListener("change", retheme);
   new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
   let start = 0;

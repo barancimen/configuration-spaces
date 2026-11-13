@@ -58,6 +58,8 @@ Limitations:
 - Samples are random but not uniformly distributed over the space.
 - `where` shapes are not drawn, and differences are drawn without the cut.
 - Meant for mechanisms up to tens of variables.
+- Drawn with the browser's 2D canvas (no WebGL or external libraries), so it works everywhere;
+  overlapping solids are depth-sorted face by face, which can misorder interpenetrating parts.
 
 ## Proving claims
 
