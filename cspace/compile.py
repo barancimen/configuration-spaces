@@ -1,7 +1,7 @@
 """Turn a Spec into a System: variables, polynomial equations and inequalities."""
 from dataclasses import dataclass, field
 
-from sympy import Add, And, Eq, Ge, Symbol, cos, eye, expand, sin, true
+from sympy import Add, And, Eq, Ge, Integer, Mul, Symbol, cos, eye, expand, sin, true
 
 from .joints import KINDS, coordinate, coupling, limits
 from .se3 import inv, split
@@ -59,6 +59,27 @@ class System:
         return And(*c) if c else true
 
 
+def _power_of(t, var):
+    """(rest, k) with t = rest * var**k, read off the factors directly. SymPy's as_coeff_exponent
+    does the same through collect(), which is very slow on terms with radicals."""
+    if t == var:
+        return Integer(1), 1
+    if t.is_Pow and t.base == var and t.exp.is_Integer:
+        return Integer(1), int(t.exp)
+    if t.is_Mul:
+        k, rest = 0, []
+        for f in t.args:
+            if f == var:
+                k += 1
+            elif f.is_Pow and f.base == var and f.exp.is_Integer:
+                k += int(f.exp)
+            else:
+                rest.append(f)
+        if k:
+            return Mul(*rest), k
+    return t, 0
+
+
 class Reducer:
     """Normal form modulo c^2 + s^2 = 1 and |q|^2 = 1 (replace s^2 and q0^2)."""
 
@@ -77,8 +98,7 @@ class Reducer:
                 continue
             out = []
             for t in Add.make_args(e):
-                coeff, k = t.as_coeff_exponent(var)
-                k = int(k)
+                coeff, k = _power_of(t, var)
                 out.append(coeff * var**(k % 2) * square**(k // 2) if k >= 2 else t)
             e = expand(Add(*out))
         return e

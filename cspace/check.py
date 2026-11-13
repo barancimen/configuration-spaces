@@ -29,16 +29,26 @@ def sample(system, tries=30, seed=0, values=None, tol=1e-9):
     F = lambdify(X, eqs, "numpy")
     G = lambdify(X, ineqs, "numpy")
     J = lambdify(X, Matrix(eqs).jacobian(X) if eqs else Matrix.zeros(1, len(X)), "numpy")
+    JG = lambdify(X, Matrix(ineqs).jacobian(X) if ineqs else Matrix.zeros(1, len(X)), "numpy")
 
     def resid(x):
         r = np.atleast_1d(np.array(F(*x), dtype=float))
         g = np.atleast_1d(np.array(G(*x), dtype=float)) if ineqs else np.zeros(0)
         return np.concatenate([r, np.minimum(g, 0.0)])
 
+    def jac(x):                                     # exact, so SciPy need not difference
+        rows = [np.array(J(*x), dtype=float).reshape(-1, len(X))[:len(eqs)]]
+        if ineqs:
+            g = np.atleast_1d(np.array(G(*x), dtype=float))
+            JGx = np.array(JG(*x), dtype=float).reshape(-1, len(X))
+            rows.append(JGx * (g < 0)[:, None])
+        return np.vstack(rows)
+
     points = []
     for _ in range(tries):
         x0 = rng.uniform(-2, 2, len(X))
-        sol = least_squares(resid, x0, xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=4000)
+        sol = least_squares(resid, x0, jac=jac if eqs or ineqs else "2-point",
+                            xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=4000)
         if np.max(np.abs(resid(sol.x)), initial=0.0) < tol:
             sv = np.linalg.svd(np.array(J(*sol.x), dtype=float), compute_uv=False)
             rank = int((sv > 1e-7 * max(1.0, sv[0])).sum())

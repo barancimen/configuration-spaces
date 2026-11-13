@@ -62,6 +62,53 @@ Limitations:
 - Drawn with the browser's 2D canvas (no WebGL or external libraries), so it works everywhere;
   overlapping solids are depth-sorted face by face, which can misorder interpenetrating parts.
 
+## Simulating in MuJoCo
+
+```
+python3 -m cspace.mjcf examples/stewart.yaml -o stewart.xml --motors leg1,leg2,leg3,leg4,leg5,leg6
+python3 examples/simulate_mujoco.py stewart.xml --wiggle --view      # needs: pip install mujoco
+```
+
+`cspace.mjcf` writes MuJoCo's MJCF format.
+
+| cspace | MuJoCo |
+|---|---|
+| spanning tree | body tree |
+| revolute, prismatic, spherical, free | hinge, slide, ball, freejoint |
+| universal, cylindrical, planar | several hinges and slides in one body, axes computed at the sample |
+| joint ranges and limits | joint `range` |
+| loop-closing spherical / fixed / revolute | `connect` / `weld` / two `connect`s on the axis |
+| two-joint linear `gear` / `couple` | joint equality |
+| box, ball, cylinder, hull, unions | geoms (hull becomes a mesh) |
+| bodies without a shape | thin capsules between their frames |
+| `no_overlap` pairs | the only contact pairs |
+
+**Starting pose.** The model is written at a valid sampled pose, with each hinge and slide's
+`ref` set to its value there. MuJoCo derives loop-closing anchors from that reference pose, so
+every loop starts exactly closed. `--keyframes N` adds more valid samples as keyframes.
+
+**Motors.** `--motors` adds position actuators. By default the gain is set so gravity moves each
+joint by about 1% of the mechanism's size, with near-critical damping; `--kp` overrides it.
+
+**Mass.** Mass comes from geom volumes at `--density` (default 1000), in the file's length units.
+
+Not exported, reported as warnings:
+- loop-closing prismatic, cylindrical, planar and universal joints (list them so they become tree
+  joints);
+- the implicit constraints (`point_on_line`, `point_on_plane`, `distance`, `parallel`);
+- couplings of more than two joints;
+- cone limits;
+- non-convex shapes (`difference`, `where`).
+
+MuJoCo enforces constraints softly, so loops drift slightly during simulation, and contact
+replaces `no_overlap`.
+
+**How it is tested.** MuJoCo isn't installed where this was written, so `tests/test_mjcf.py`
+uses a small forward-kinematics interpreter that follows MuJoCo's documented conventions. For
+every keyframe of nine models, it reproduces the compiler's body poses to 1e-8. Every connect,
+weld and joint equality also holds in every keyframe. The first real MuJoCo run is the remaining
+check.
+
 ## Proving claims
 
 ```
