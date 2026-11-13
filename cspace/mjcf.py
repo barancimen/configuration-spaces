@@ -128,9 +128,10 @@ def fmt(v):
 # ---------- the exporter ----------
 
 class Exporter:
-    def __init__(self, spec, system, density=1000.0, damping=0.05, gravity=True, timestep=0.002):
+    def __init__(self, spec, system, density=1000.0, damping=0.05, gravity=True, timestep=0.002, pair=None):
         self.spec, self.system = spec, system
         self.density, self.damping, self.gravity, self.timestep = density, damping, gravity, timestep
+        self.pair = dict(pair or {})        # defaults for every contact pair (solref, solimp)
         self.warnings = []
         X = system.variables
         self._pose = {b: lambdify(X, M, "numpy") for b, M in system.poses.items()}
@@ -208,6 +209,46 @@ class Exporter:
         return (j.kind == "free" and j.parent == "world" and j.a == "world"
                 and np.allclose(num(j.Fa), np.eye(4)) and np.allclose(num(j.Fb), np.eye(4)))
 
+    def order(self):
+        """Tree joints in the order MuJoCo numbers them (depth first, as the bodies are written)."""
+        children = {}
+        for j in self.tree:
+            children.setdefault(j.parent, []).append(j)
+        out = []
+
+        def walk(body):
+            for j in children.get(body, []):
+                out.append(j)
+                walk(self.child(j))
+
+        walk("world")
+        return out
+
+    def configuration(self, qpos):
+        """The configuration x for a MuJoCo qpos of the exported model: the inverse of qpos().
+        Hinges, slides and free bodies only (a ball joint's qpos depends on the pose the model was
+        written at)."""
+        index = {v: i for i, v in enumerate(self.system.variables)}
+        x, i = np.zeros(len(index)), 0
+        for j in self.order():
+            if self.freejoint(j):
+                for r, v in zip(("x", "y", "z", "q0", "q1", "q2", "q3"), qpos[i:i + 7]):
+                    x[index[j.values[r]]] = v
+                i += 7
+                continue
+            roles = [r for _, _, r in ELEMENTS[j.kind]]
+            if "q" in roles:
+                raise SpecError(f"{j.name}: a recorded motion cannot be read back through a ball joint")
+            for r in (roles if j.parent == j.a else roles[::-1]):
+                if r.startswith("c"):
+                    x[index[j.values[r]]], x[index[j.values["s" + r[1:]]]] = np.cos(qpos[i]), np.sin(qpos[i])
+                else:
+                    x[index[j.values[r]]] = qpos[i]
+                i += 1
+        if i != len(qpos):
+            raise SpecError(f"the recording has {len(qpos)} coordinates per frame, the mechanism has {i}")
+        return x
+
     # ---------- geometry ----------
     def geoms(self, body, scale):
         b = self.spec.bodies.get(body)
@@ -254,7 +295,10 @@ class Exporter:
                       gravity="0 0 -9.81" if self.gravity else "0 0 0")
         default = ET.SubElement(root, "default")
         ET.SubElement(default, "geom", contype="0", conaffinity="0", density=f"{self.density:g}")
-        ET.SubElement(default, "joint", damping=f"{self.damping:g}")
+        limit = {"solreflimit": self.pair["solref"]} if "solref" in self.pair else {}   # stops as stiff as contacts
+        ET.SubElement(default, "joint", damping=f"{self.damping:g}", **limit)
+        if self.pair:
+            ET.SubElement(default, "pair", **self.pair)
         asset = ET.SubElement(root, "asset")
         world = ET.SubElement(root, "worldbody")
         ET.SubElement(world, "light", pos="0 0 10", dir="0 0 -1", directional="true")
@@ -560,7 +604,7 @@ def start_pose(spec, system):
     return sol.x
 
 
-def export(path, given=None, keyframes=1, motors=None, kp=None, density=1000.0, damping=0.05,
+def export(path, given=None, keyframes=1, motors=None, kp=None, density=None, damping=0.05,
            gravity=None, seed=0, timestep=None):
     """Returns (xml text, exporter, samples). Unset options come from the file's simulation: block."""
     from .spec import truthy
@@ -574,13 +618,22 @@ def export(path, given=None, keyframes=1, motors=None, kp=None, density=1000.0, 
         gravity = truthy(sim.get("gravity", "true"))
     if timestep is None:
         timestep = float(spec.num(sim.get("timestep", "0.002")))
+    if density is None:
+        density = float(spec.num(sim.get("density", "1000")))
+    pair = {}
+    for key, count in (("solref", 2), ("solimp", 3)):       # contact stiffness, in MuJoCo's own terms
+        if key in sim:
+            vals = sim[key]
+            if not isinstance(vals, list) or len(vals) != count:
+                raise SpecError(f"simulation: {key} expects {count} numbers")
+            pair[key] = fmt([float(spec.num(v)) for v in vals])
     settings = sim.get("motors") or {}
     if isinstance(settings, list):
         settings = {str(m): {} for m in settings}
     if motors is None:
         motors = list(settings)
     system = compile_spec(spec, shapes=False)
-    ex = Exporter(spec, system, density, damping, gravity, timestep)
+    ex = Exporter(spec, system, density, damping, gravity, timestep, pair)
     if spec.start:
         xs = [start_pose(spec, system)] + (valid_samples(system, keyframes - 1, seed) if keyframes > 1 else [])
     else:
@@ -602,7 +655,7 @@ def main(argv=None):
     ap.add_argument("--motors", default="", help="comma-separated hinges/slides to drive with position actuators")
     ap.add_argument("--kp", type=float, default=None,
                     help="position actuator gain (default: gravity moves a joint by about 1%% of the size)")
-    ap.add_argument("--density", type=float, default=1000.0)
+    ap.add_argument("--density", type=float, default=None, help="default: the file's simulation: density, or 1000")
     ap.add_argument("--damping", type=float, default=0.05)
     ap.add_argument("--no-gravity", action="store_true", help="default: the file's simulation: gravity")
     ap.add_argument("--seed", type=int, default=0)

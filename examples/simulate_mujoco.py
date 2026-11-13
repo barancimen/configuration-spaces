@@ -6,7 +6,7 @@
 It starts from the 'sample' keyframe (a valid pose with matching controls), optionally moves every
 position actuator around its starting value with a sine wave, and prints the worst loop-closure
 error (distance between the two anchors of each connect constraint) as the simulation runs.
-Written for MuJoCo 3.x; not run on the machine that wrote it.
+Written for MuJoCo 3.x (run with 3.17).
 """
 import argparse
 import math

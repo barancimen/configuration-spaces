@@ -82,8 +82,9 @@ def _prims(spec, node, T, out, notes, body, js, flag=""):
         notes.append(f"{body}: a 'where' shape (polynomial inequalities) is not drawn")
 
 
-def system_js(spec, system, defaults):
-    """The JavaScript object literal for one compiled mechanism."""
+def system_js(spec, system, defaults, replay=None):
+    """The JavaScript object literal for one compiled mechanism. `replay` is (seconds per frame,
+    list of configurations) for a recorded motion that the page plays back instead of sampling."""
     X, P = system.variables, list(spec.params)
     js = JS(X, P)
     notes = list(system.notes[1:]) if system.notes else []
@@ -111,6 +112,8 @@ def system_js(spec, system, defaults):
         for j in system.joints if j.values)
     params = [{"name": q.name, "value": float(defaults[q.name])} for q in P]
     starts = _starts(spec, system, js)
+    frames = "null" if replay is None else (
+        f"{{dt: {replay[0]:g}, frames: [" + ", ".join("[" + ", ".join(f"{v:.5g}" for v in x) + "]" for x in replay[1]) + "]}")
     return f"""{{
   name: {json.dumps(spec.name)},
   vars: {json.dumps([v.name for v in X])},
@@ -127,6 +130,7 @@ def system_js(spec, system, defaults):
   joints: [{coords}],
   geometry: {js.fn("p", "[" + ", ".join(bodies) + "]")},
   starts: {js.fn("p", "[" + ", ".join(starts) + "]")},
+  replay: {frames},
   notes: {json.dumps(notes)}
 }}"""
 
@@ -170,17 +174,33 @@ def _defaults(spec, given):
     return vals
 
 
-def page(entries, title="Configuration Explorer", standalone=True):
+def recording(path, spec, system):
+    """A motion recorded from MuJoCo (an .npz file with `time` and `qpos`, one row per frame, from a
+    model that cspace.mjcf exported from this mechanism) as (seconds per frame, configurations)."""
+    from .mjcf import Exporter
+    data = np.load(path)
+    if "qpos" not in data or "time" not in data or len(data["time"]) < 2:
+        raise SpecError(f"{path}: expected arrays 'time' and 'qpos' with at least two frames")
+    ex = Exporter(spec, system)
+    dt = float(np.median(np.diff(data["time"])))
+    return dt, [ex.configuration(q) for q in data["qpos"]]
+
+
+def page(entries, title="Configuration Explorer", standalone=True, replay=None):
     """entries: list of (spec path, {param: value}) -> HTML text. `standalone` adds the
-    document skeleton; leave it off for hosts that add their own."""
+    document skeleton; leave it off for hosts that add their own. `replay` is a recording of the
+    first mechanism (see `recording`), which the page then plays back."""
     systems = []
-    for path, given in entries:
+    for n, (path, given) in enumerate(entries):
         spec = load(path, ALL_KINDS)
         for k in given:
             if k not in {q.name for q in spec.params}:
                 raise SpecError(f"{path}: {k!r} is not a symbolic parameter")
+        defaults = _defaults(spec, given)
+        if replay and n == 0 and spec.params:      # the recording was made with these values
+            spec = load(path, ALL_KINDS, {k: str(v) for k, v in defaults.items()})
         system = compile_spec(spec, shapes=False)
-        systems.append(system_js(spec, system, _defaults(spec, given)))
+        systems.append(system_js(spec, system, defaults, recording(replay, spec, system) if replay and n == 0 else None))
     html = TEMPLATE.read_text()
     html = html.replace("/*SYSTEMS*/", "[\n" + ",\n".join(systems) + "\n]").replace("__TITLE__", title)
     if standalone:
@@ -202,9 +222,11 @@ def main(argv=None):
     ap.add_argument("-o", "--output", default="explorer.html")
     ap.add_argument("--title", default="Configuration Explorer")
     ap.add_argument("--fragment", action="store_true", help="omit the document skeleton")
+    ap.add_argument("--replay", metavar="FILE.npz", help="play back a motion recorded from MuJoCo for the "
+                    "first mechanism (arrays 'time' and 'qpos'; examples/run_helixturm.py --record writes one)")
     args = ap.parse_args(argv)
     try:
-        html = page([parse_entry(s) for s in args.specs], args.title, not args.fragment)
+        html = page([parse_entry(s) for s in args.specs], args.title, not args.fragment, args.replay)
     except (SpecError, ValueError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 2

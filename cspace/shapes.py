@@ -179,6 +179,7 @@ class Polytope:
     verts: list      # 3x1 matrices
     faces: list      # (outward normal n, offset d): the solid is n . p <= d
     edges: list      # edge directions, one per parallel class
+    paired: tuple = ()   # indices of faces that have a parallel face on the opposite side
 
     def moved(self, T, red=None):
         R, t = T[:3, :3], T[:3, 3]
@@ -186,7 +187,7 @@ class Polytope:
         mv = lambda v: (R * v).applyfunc(f)
         return Polytope([(R * v + t).applyfunc(f) for v in self.verts],
                         [(mv(n), f(d + (R * n).dot(t))) for n, d in self.faces],
-                        [mv(e) for e in self.edges])
+                        [mv(e) for e in self.edges], self.paired)
 
     def interior(self):
         return And(*[gt(d - n.dot(P)) for n, d in self.faces])
@@ -225,7 +226,7 @@ def _hull(spec, pts):
         raise SpecError(f"hull is degenerate (flat or repeated points): {err}")
     verts = [V[i] for i in H.vertices]
     centre = sum(verts, zeros(3, 1)) / len(verts)
-    faces, planes, edges, dirs = [], set(), [], set()
+    faces, planes, sides = [], set(), {}
     for tri in H.simplices:
         a, b, c = (V[i] for i in tri)
         n = (b - a).cross(c - a).applyfunc(expand)
@@ -236,12 +237,20 @@ def _hull(spec, pts):
         if key not in planes:
             planes.add(key)
             faces.append((n, d))
-        for u, w in ((a, b), (b, c), (c, a)):
-            k = _canon_dir(w - u)
-            if k not in dirs:
-                dirs.add(k)
-                edges.append(w - u)
-    return Polytope(verts, faces, edges)
+        for i, j in ((tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])):
+            sides.setdefault((min(i, j), max(i, j)), set()).add(key)
+    edges, dirs = [], set()
+    for (i, j), keys in sides.items():
+        if len(keys) < 2:        # a diagonal inside a flat face (the hull comes as triangles): not an edge
+            continue
+        k = _canon_dir(V[j] - V[i])
+        if k not in dirs:
+            dirs.add(k)
+            edges.append(V[j] - V[i])
+    zero = lambda v: all(expand(c) == 0 for c in v)
+    paired = tuple(i for i, (n, _) in enumerate(faces)
+                   if any(zero(n.cross(m)) and expand(n.dot(m)).is_negative for m, _ in faces))
+    return Polytope(verts, faces, edges, paired)
 
 
 def pieces(spec, node, T=None):
@@ -254,7 +263,7 @@ def pieces(spec, node, T=None):
         E = Matrix.eye(3)
         verts = [Matrix([sx * h[0], sy * h[1], sz * h[2]]) for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
         faces = [(sg * E[:, i], h[i]) for i in range(3) for sg in (1, -1)]
-        return [Polytope(verts, faces, [E[:, i] for i in range(3)]).moved(T)]
+        return [Polytope(verts, faces, [E[:, i] for i in range(3)], tuple(range(6))).moved(T)]
     if kind == "hull":
         return [_hull(spec, v).moved(T)]
     if kind == "ball":
@@ -273,11 +282,17 @@ def _separated(A, B, red):
     if isinstance(A, Polytope) and isinstance(B, Polytope):
         alts = [And(*[ge(n.dot(w) - d, red) for w in B.verts]) for n, d in A.faces]
         alts += [And(*[ge(n.dot(v) - d, red) for v in A.verts]) for n, d in B.faces]
+        # A direction along which one of the solids has two parallel faces is already settled by
+        # those two faces' alternatives above, whichever way round the solids lie along it.
+        tidy = red or expand
+        settled = [A.faces[i][0] for i in A.paired] + [B.faces[i][0] for i in B.paired]
         for e in A.edges:
             for f in B.edges:
-                n = e.cross(f).applyfunc(red)
+                n = e.cross(f).applyfunc(tidy)
                 guard = gt(n.dot(n), red)
                 if guard is false:
+                    continue
+                if any(all(c == 0 for c in m.cross(n).applyfunc(tidy)) for m in settled):
                     continue
                 diffs = [n.dot(w - v) for v in A.verts for w in B.verts]
                 alts.append(And(guard, *[ge(x, red) for x in diffs]))

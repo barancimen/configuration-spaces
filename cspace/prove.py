@@ -63,7 +63,7 @@ def read_claims(entries):
 def _solve(formula, quant, timeout):
     reasons = []
     for label in (("z3", "nlqsat") if quant else ("z3",)):
-        s = z3.Solver() if label == "z3" else z3.Tactic("nlqsat").solver()
+        s = z3.Solver(ctx=formula.ctx) if label == "z3" else z3.Tactic("nlqsat", formula.ctx).solver()
         s.set("timeout", int(timeout * 1000))
         s.add(formula)
         try:
@@ -109,7 +109,7 @@ def _solve_split(query, timeout):
     for g in sorted(_groups(query), key=lambda g: len(g.free_symbols)):
         T = Z3()
         fz = T.formula(g)
-        r, model, how = _solve(z3.And(fz, *T.defs), quantified(g), timeout)
+        r, model, how = _solve(z3.And([fz, *T.defs], T.ctx), quantified(g), timeout)
         if r == z3.unsat:
             return r, None, how, None
         if r == z3.unknown:

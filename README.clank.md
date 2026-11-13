@@ -53,6 +53,17 @@ Each mechanism is compiled into the page as JavaScript: equations, exact Jacobia
 poses, joint coordinates and shapes. Every shown pose satisfies the equations to about 1e-13,
 the joint limits, and the quantifier-free `no_overlap` conditions.
 
+**Replaying a simulation.** `--replay run.npz` makes the page play back a motion recorded from
+MuJoCo instead of sampling:
+
+```
+python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html
+```
+
+The file holds the arrays `time` and `qpos`, one row per frame, from a model that `cspace.mjcf`
+exported from the first mechanism listed. The page gets a play button and a time slider. Hinges,
+slides and free bodies are read back; a mechanism with a ball joint in its tree cannot be replayed.
+
 Limitations:
 - `no_overlap` conditions are only checked, never used to steer sampling, so tight collision
   constraints may need many tries. Quantified ones are not checked at all.
@@ -117,6 +128,9 @@ start:                                 # initial pose: listed joints held exactl
 simulation:                            # defaults for the exporter; command-line flags override
   gravity: false
   timestep: 0.0005
+  density: 600                         # for the bodies' mass, instead of --density
+  solref: [0.004, 1]                   # how stiff contacts and joint stops are: MuJoCo's time
+                                       # constant (seconds) and damping ratio; solimp: likewise
   motors: {lever: {kp: 5, damping: 0.05}}
 ```
 
@@ -133,11 +147,88 @@ push on each other.
 
 The tests check that its start pose has no contact pair interpenetrating.
 
-**How it is tested.** MuJoCo isn't installed where this was written, so `tests/test_mjcf.py`
-uses a small forward-kinematics interpreter that follows MuJoCo's documented conventions. For
-every keyframe of nine models, it reproduces the compiler's body poses to 1e-8. Every connect,
-weld and joint equality also holds in every keyframe. The first real MuJoCo run is the remaining
-check.
+**How it is tested.** `tests/test_mjcf.py` needs no MuJoCo: it uses a small forward-kinematics
+interpreter that follows MuJoCo's documented conventions. For every keyframe of nine models, it
+reproduces the compiler's body poses to 1e-8. Every connect, weld and joint equality also holds
+in every keyframe. In MuJoCo itself (3.17), the exported four-bar and Stewart platform load and
+run with their loops closed at the start (worst loop error over two seconds of driving: 1.7e-4
+and 2.4e-3 in the files' length units), and the helix tower below is built and checked by
+`tests/test_helixturm.py`.
+
+## The helix tower
+
+`examples/helixturm.yaml` is a tower that builds itself upward from stored segments, after Konrad
+Zuse's Helixturm (HT1, 1993). It is described in cspace's format and simulated in MuJoCo with
+gravity, contact, friction, springs and one motor; `examples/helixturm_lock.yaml` proves how its
+segments lock.
+
+```
+python3 examples/make_helixturm.py > examples/helixturm.yaml        # the generator; --turns, --columns
+python3 -m cspace.mjcf examples/helixturm.yaml -o helixturm.xml
+python3 examples/run_helixturm.py helixturm.xml --push 10 --record run.npz   # build it, check it
+python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html   # watch it
+python3 -m cspace examples/helixturm_lock.yaml --prove              # the lock, decided by z3
+```
+
+**The machine.** 50 bodies: a hexagonal tower with six columns, around a fixed stator.
+- **Rotor:** a staircase cam, turned by the only motor. Per revolution it has six flats joined by
+  six short ramps, then one steep return.
+- **Lifter and bolt** (one pair per column): the lifter slides vertically and its foot rides the cam.
+  It carries a spring-loaded latch bolt that reaches into a segment's window and lifts it by the
+  lintel. The bolt is flat on top and bevelled below, so on the way down it is pushed back, passes
+  the next segment and snaps into that one's window.
+- **Magazine** (one per column): a spring-loaded plate pushes a queue of segments toward the tower.
+- **Segments** (18, free bodies): two legs and a lintel around a window, a finger with a pin at
+  each end, and two slots for neighbours' pins.
+- **Head:** one turn of segment stubs under a cap; its underside is the helix.
+
+**One step** is a sixth of a revolution and adds one segment:
+1. All bolts rest on flats. The column whose bottom has reached one segment height gets the next
+   segment pushed under it by its magazine.
+2. That column's lifter sets it down on the new segment, drops to it and latches.
+3. All six lifters rise by a sixth of a segment height.
+
+Segment *i* goes into column *i* mod 6, so each sits a sixth of a height below the one before it.
+
+**What the simulation shows** (18 segments, one every 1.6 s, 34 kg in all, the head 9 kg):
+
+| Check | Result |
+|---|---|
+| Segments within 2 mm and 0.5° of their place | 18 of 18 |
+| Head rise | 720.02 mm (three turns are 720 mm), tilt 0.01°, 0.75 mm off axis |
+| Rotor stopped, tower on its bolts | nothing moves more than 0.12 mm in 1.5 s |
+| 10 N sideways on the head for a second | the head gives 1.8 mm; all segments stay within 5 mm |
+| Motor | peak torque on the cam 27 N m; 156 J of work, of which 111 J became height |
+
+A 20 N push makes the head give 8.5 mm: the joints have play, and the push starts to tip the tower.
+
+**What the prover shows.** A segment's own two pins slide into slots of earlier segments along its
+own radial direction. Two later segments then pin it, each coming in along a direction turned by
+60°: segment *i*+1 at its right end, segment *i*+5 at its lower left corner.
+
+| Claim | Model | Answer |
+|---|---|---|
+| `held`: within 6 mm of its place, the segment is within 1 mm (2 mm vertically) | real shapes, no turning | proved |
+| `comesOutLast`: with both later segments drawn out, it slides out | real shapes | proved |
+| `neverComesOut` (false on purpose) | real shapes | refuted |
+| `pinned…` (5 claims): within 0.6 mm and 0.3° when all four pins sit in their channels | plane motion with turning | proved |
+| `swingsWithoutLowerPin`: before segment *i*+5 is in, the left end can swing out | plane motion | proved |
+| `slidesOnItsOwnPins`: on its own two pins it still slides straight out | plane motion | proved |
+
+The plane-motion model treats a round pin between two rails as a point in a channel as wide as
+the clearance. With the real shapes and turning together, z3 did not finish in six minutes.
+
+**What it is not.**
+- **It only extends.** The latch bolts work one way. Zuse's lifting arms were moved in and out by
+  a second cam, which is what lets his tower also retract.
+- **It is not Zuse's geometry.** His segments were slanted sheet-metal parts and the motion was
+  continuous, with eight magazines. Here the segments are boxes, the motion is stepwise, and the
+  generator allows 4 to 6 columns, because the joint has to fit in the corner between two walls.
+- **The lock is proved for one segment and its neighbours,** not for the whole tower, and not
+  against tilting out of the wall's plane. The simulation covers those.
+- **The machine has to be stopped** when the magazines are empty; the run script does that.
+- Contacts in MuJoCo are slightly soft (a 4 ms time constant), and the clearances are 0.2 to
+  2 mm on a 240 mm segment.
 
 ## Proving claims
 
@@ -224,6 +315,8 @@ unknown, because proving it requires following the chain all the way to the worl
 - Constants must be algebraic: `sqrt(2)` and `cos(pi/12)` are fine, but `pi` itself and
   the `--trig` view are not.
 - The prover trusts z3's answers.
+- Each solver call gets a z3 context of its own. Without that, how long z3 took on a claim
+  depended on which claims the same run had asked before it.
 
 Options: `--timeout` (per solver call), `--budget` (per claim), `--max-bodies`, and `-v`
 to see each attempt.
@@ -347,6 +440,9 @@ Any node may carry `at`, `z`, `x`.
 | `stewart` | 14-body Stewart platform: six closed spatial loops, 37 variables, 6 freedoms |
 | `cube_on_cube` | claims: never convex, never hangs over, a deliberately false claim |
 | `make_snake.py` | generates an N-link chain with local claims (scaling test) |
+| `ratchet_drive` | springs, contacts and a start pose for MuJoCo (from `make_ratchet_drive.py`) |
+| `helixturm` | a self-building tower: 50 bodies, 19 of them free, contacts only (from `make_helixturm.py`; run with `run_helixturm.py`) |
+| `helixturm_lock` | the tower's joints alone, with claims about how they lock |
 
 ## Are pairwise constraints enough?
 
@@ -375,3 +471,6 @@ The installed pytest 5.2 needs plugin autoload off on Python 3.10:
 ```
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider --assert=plain tests/
 ```
+
+`tests/test_helixturm.py` takes about a minute. Its MuJoCo run (two steps of a small tower) is
+skipped when MuJoCo is not installed.

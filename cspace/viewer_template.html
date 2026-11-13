@@ -95,8 +95,8 @@ kbd { font-family: var(--font-data); font-size: 0.72rem; border: 1px solid var(-
 <div class="app">
   <aside class="panel">
     <header>
-      <h1>Configuration Explorer</h1>
-      <p class="lede">Every pose drawn here satisfies all the joints, limits and collision rules of the mechanism. Sample anywhere in its configuration space, or step to a nearby pose.</p>
+      <h1>__TITLE__</h1>
+      <p class="lede" id="lede">Every pose drawn here satisfies all the joints, limits and collision rules of the mechanism. Sample anywhere in its configuration space, or step to a nearby pose.</p>
     </header>
 
     <div class="group">
@@ -110,7 +110,16 @@ kbd { font-family: var(--font-data); font-size: 0.72rem; border: 1px solid var(-
       <p class="warn" id="paramWarn" hidden></p>
     </div>
 
-    <div class="group">
+    <div class="group" id="replayGroup" hidden>
+      <span class="label">Recorded motion</span>
+      <div class="buttons">
+        <button class="primary" id="replayPlay" type="button" aria-pressed="false">Play <kbd>Space</kbd></button>
+        <button id="replayRestart" type="button">Restart</button>
+      </div>
+      <label class="step" for="replayPos">Time <input id="replayPos" type="range" min="0" max="0" step="1" value="0"> <span id="replayTime">0.0 s</span></label>
+    </div>
+
+    <div class="group" id="sampleGroup">
       <span class="label">Sample</span>
       <div class="buttons">
         <button class="primary" id="global" type="button">Sample anywhere <kbd>G</kbd></button>
@@ -477,16 +486,19 @@ var CSPACE = (function () {
     redraw();
   }
 
-  // Fit the view to the mechanism at its current pose.
+  // Fit the view to the mechanism at its current pose (a recorded motion: at its first and last pose).
   function frameMechanism() {
     if (!state.x) return;
-    const poses = state.sys.poses(state.x, state.p), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const rec = state.sys.replay, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     const add = p => p.forEach((v, k) => { lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); });
-    for (const b of state.bodies) {
-      const P = b.name === "world" ? I4 : (poses[b.name] || I4);
-      b.markers.forEach(m => add(apply(P, m)));
-      b.faces.forEach(f => f.pts.forEach(p => add(apply(P, p))));
-      b.balls.forEach(s => { const c = apply(P, s.c); add(c.map(v => v - s.r)); add(c.map(v => v + s.r)); });
+    for (const x of (rec ? [rec.frames[0], rec.frames[rec.frames.length - 1]] : [state.x])) {
+      const poses = state.sys.poses(x, state.p);
+      for (const b of state.bodies) {
+        const P = b.name === "world" ? I4 : (poses[b.name] || I4);
+        b.markers.forEach(m => add(apply(P, m)));
+        b.faces.forEach(f => f.pts.forEach(p => add(apply(P, p))));
+        b.balls.forEach(s => { const c = apply(P, s.c); add(c.map(v => v - s.r)); add(c.map(v => v + s.r)); });
+      }
     }
     if (!Number.isFinite(lo[0])) return;
     view.center = lo.map((v, k) => (v + hi[k]) / 2);
@@ -547,6 +559,35 @@ var CSPACE = (function () {
     let fails = 0;
     state.walk = setInterval(() => { fails = sample("local") ? 0 : fails + 1; if (fails >= 6) stopWalk(); }, 70);
   }
+  // ---------- a recorded motion: frames of configurations, played back ----------
+  const replay = { i: 0, timer: null };
+  function showFrame(i, full) {
+    const rec = state.sys.replay;
+    replay.i = Math.max(0, Math.min(rec.frames.length - 1, i));
+    state.x = rec.frames[replay.i];
+    $("replayPos").value = String(replay.i);
+    $("replayTime").textContent = (replay.i * rec.dt).toFixed(1) + " s";
+    $("status").innerHTML = `<span class="chip ok">Recorded motion</span><span>frame ${replay.i + 1} of ${rec.frames.length}</span>`;
+    if (full) readout();           // the joint table is long; it is refreshed when the motion stands still
+    redraw();
+  }
+  function stopReplay() {
+    if (replay.timer) clearInterval(replay.timer);
+    replay.timer = null;
+    $("replayPlay").setAttribute("aria-pressed", "false");
+    if (state.sys && state.sys.replay && state.x) readout();
+  }
+  function toggleReplay() {
+    const rec = state.sys.replay;
+    if (!rec) return;
+    if (replay.timer) return stopReplay();
+    if (replay.i >= rec.frames.length - 1) showFrame(0);
+    $("replayPlay").setAttribute("aria-pressed", "true");
+    replay.timer = setInterval(() => {
+      if (replay.i >= rec.frames.length - 1) return stopReplay();
+      showFrame(replay.i + 1);
+    }, rec.dt * 1000);
+  }
   function renderParams() {
     const sys = state.sys, box = $("params");
     box.innerHTML = "";
@@ -576,12 +617,19 @@ var CSPACE = (function () {
     $("notes").innerHTML = notes.map(n => `<li>${n.replace(/[<&]/g, c => (c === "<" ? "&lt;" : "&amp;"))}</li>`).join("");
   }
   function selectSystem(i) {
-    stopWalk();
+    stopWalk(); stopReplay();
     state.sys = SYSTEMS[i];
     state.p = state.sys.params.map(q => q.value);
     state.x = null; state.samples = 0;
     renderParams(); renderNotes(); build(); resize();
-    sample("global");
+    const rec = state.sys.replay;
+    $("replayGroup").hidden = !rec;
+    $("sampleGroup").hidden = !!rec;
+    $("lede").textContent = rec
+      ? "A motion of this mechanism recorded from a physics simulation (MuJoCo), played back. Each frame is one point of its configuration space."
+      : "Every pose drawn here satisfies all the joints, limits and collision rules of the mechanism. Sample anywhere in its configuration space, or step to a nearby pose.";
+    if (rec) { $("replayPos").max = String(rec.frames.length - 1); showFrame(0, true); frameMechanism(); }
+    else sample("global");
     try { localStorage.setItem("cspace-system", String(i)); } catch (e) { /* storage unavailable */ }
   }
 
@@ -595,9 +643,13 @@ var CSPACE = (function () {
   $("local").addEventListener("click", () => sample("local"));
   $("walk").addEventListener("click", toggleWalk);
   $("step").addEventListener("input", e => { $("stepVal").textContent = (+e.target.value).toFixed(2); });
+  $("replayPlay").addEventListener("click", toggleReplay);
+  $("replayRestart").addEventListener("click", () => { stopReplay(); showFrame(0, true); });
+  $("replayPos").addEventListener("input", e => { stopReplay(); showFrame(+e.target.value, true); });
   document.addEventListener("keydown", e => {
     if (e.target.matches("input, select, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    if (state.sys.replay) { if (k === " ") { e.preventDefault(); toggleReplay(); } return; }
     if (k === "g") sample("global"); else if (k === "l") sample("local"); else if (k === "w") toggleWalk();
   });
   const schemes = window.matchMedia("(prefers-color-scheme: dark)");

@@ -60,10 +60,13 @@ class Z3:
 
     def __init__(self):
         self.vars, self.consts, self.defs = {}, {}, []
+        # A context of its own: how long z3 takes on a formula otherwise depends on what the same
+        # process asked it before.
+        self.ctx = z3.Context()
 
     def var(self, s):
         if s.name not in self.vars:
-            self.vars[s.name] = z3.Real(s.name)
+            self.vars[s.name] = z3.Real(s.name, self.ctx)
         return self.vars[s.name]
 
     def const(self, e):
@@ -77,23 +80,23 @@ class Z3:
                             "the prover only handles algebraic numbers")
         val = e.evalf(60)
         lo, hi = next((lo, hi) for (lo, hi), _ in P.intervals() if lo <= val <= hi)
-        k = z3.Real(f"k{len(self.consts)}")
+        k = z3.Real(f"k{len(self.consts)}", self.ctx)
         self.defs += [z3.Sum([self._rat(c) * k**i for (i,), c in P.terms()]) == 0,
                       self._rat(lo) <= k, k <= self._rat(hi)]
         self.consts[e] = k
         return k
 
-    @staticmethod
-    def _rat(r):
-        return z3.RealVal(f"{r.p}/{r.q}")
+    def _rat(self, r):
+        return z3.RealVal(f"{r.p}/{r.q}", self.ctx)
 
     def term(self, e):
         if e.is_Rational:
             return self._rat(e)
         if e.is_Float:                       # a decimal, read exactly as written
             return self._rat(Rational(str(e)))
-        if e.is_number:
-            return self.const(e)
+        compound = isinstance(e, (Add, Mul)) or (isinstance(e, Pow) and e.exp.is_Integer and e.exp > 0)
+        if e.is_number and not compound:     # an irrational atom such as sqrt(3); 1 + 2*sqrt(3) is taken apart
+            return self.const(e)             # below, so constants that share a radical share one variable
         if isinstance(e, Symbol):
             return self.var(e)
         if isinstance(e, Add):
@@ -114,20 +117,20 @@ class Z3:
 
     def formula(self, f):
         if f is true or f is True:
-            return z3.BoolVal(True)
+            return z3.BoolVal(True, self.ctx)
         if f is false or f is False:
-            return z3.BoolVal(False)
+            return z3.BoolVal(False, self.ctx)
         if isinstance(f, And):
-            return z3.And([self.formula(a) for a in f.args])
+            return z3.And([self.formula(a) for a in f.args], self.ctx)
         if isinstance(f, Or):
-            return z3.Or([self.formula(a) for a in f.args])
+            return z3.Or([self.formula(a) for a in f.args], self.ctx)
         if isinstance(f, Not):
             return z3.Not(self.formula(f.args[0]))
         if isinstance(f, Implies):
             return z3.Implies(self.formula(f.args[0]), self.formula(f.args[1]))
         if isinstance(f, Equivalent):
             parts = [self.formula(a) for a in f.args]
-            return z3.And([parts[0] == p for p in parts[1:]])
+            return z3.And([parts[0] == p for p in parts[1:]], self.ctx)
         if isinstance(f, _Quantifier):
             vs = [self.var(v) for v in f.variables]
             q = z3.ForAll if isinstance(f, ForAll) else z3.Exists

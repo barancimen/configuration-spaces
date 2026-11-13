@@ -1,0 +1,4 @@
+- reachability proofs
+- dynamics
+- scale up to millions of components. Soft constraints?
+- magnetic dipoles
