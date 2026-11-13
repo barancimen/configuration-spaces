@@ -231,11 +231,18 @@ whose limit is 2 mm for every segment, counts 34 of 36 and reports the run as fa
 
 **Filming it.** `examples/render_helixturm.py` draws a recording with MuJoCo's own renderer and
 writes an animated GIF (it needs Pillow and ffmpeg; `MUJOCO_GL=egl` draws without a display).
-There are two views side by side: the whole tower, and its base from closer up. The walls of the
-columns that face the camera are translucent, nearly clear in the close view, so the cam, the
-lifters and the latch bolts show. `--speed` sets how many times faster than real time it plays
-(default 5). `--rewind` then runs the pictures backwards to the start, so the loop has no jump;
-that half is the recording in reverse order, not a simulation of the tower coming down.
+- **Two views** side by side on white, with no lettering: the whole tower, solid, and its base
+  from closer up.
+- **Greys:** every part is grey, one shade per kind of part (all segments the same), whatever
+  colours the file gives them.
+- **Fading walls:** in the close view the walls on the camera's side of the axis fade away
+  completely during the rotor's first half turn, so the cam, the lifters and the latch bolts show.
+  These are the segments, magazines, guides and floor of three columns, and that side of the head.
+- **Speed:** `--speed` sets how many times faster than real time it plays (default 4). The time
+  the tower stands still at the end of the recording is left out.
+- **Loop:** `--rewind` then runs the pictures backwards to the start without a pause, so the loop
+  has no jump and the walls come back at its end. That half is the recording in reverse order,
+  not a simulation of the tower coming down.
 
 **What it is not.**
 - **It only extends.** The latch bolts work one way. Zuse's lifting arms were moved in and out by
