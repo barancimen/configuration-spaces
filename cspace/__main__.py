@@ -32,6 +32,8 @@ def main(argv=None):
     ap.add_argument("--budget", type=float, default=120.0,
                     help="seconds per claim before the prover stops widening (default 120)")
     ap.add_argument("-v", "--verbose", action="store_true", help="print each prover attempt")
+    ap.add_argument("--view", action="store_true",
+                    help="write an interactive page (<spec name>.html) that samples and draws the mechanism")
     args = ap.parse_args(argv)
 
     try:
@@ -40,6 +42,17 @@ def main(argv=None):
         ap.error("--set expects NAME=VALUE")
     if args.prove:
         return prove_main(args, overrides)
+    if args.view:
+        from .viewer import page
+        try:
+            html = page([(args.spec, overrides)])
+        except SpecError as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        out = args.output or f"{Path(args.spec).stem}.html"
+        Path(out).write_text(html)
+        print(f"written to {out}", file=sys.stderr)
+        return 0
     try:
         spec = load(args.spec, ALL_KINDS, overrides)
         system = compile_spec(spec, args.coords, args.trig)

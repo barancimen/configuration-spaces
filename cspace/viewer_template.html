@@ -1,0 +1,544 @@
+<title>__TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: a workbench. Instrument panel on the left, the mechanism on a full-height stage. */
+:root {
+  --bg: #e9ecef;        /* steel paper */
+  --panel: #f8f9fa;
+  --ink: #1b2129;
+  --muted: #5a6573;
+  --line: #d3d9df;
+  --accent: #9a6a17;    /* brass */
+  --accent-ink: #ffffff;
+  --ok: #2c7a4c;
+  --bad: #b0442d;
+  --stage: #f1f3f5;
+  --grid: #c9d0d7;
+  --grid-strong: #aab3bd;
+  --font-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1317; --panel: #161b21; --ink: #e4e8ec; --muted: #98a3b0; --line: #29313a;
+    --accent: #d6a447; --accent-ink: #1a1408; --ok: #5cbd84; --bad: #e57a62;
+    --stage: #12171c; --grid: #232b33; --grid-strong: #34404b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1317; --panel: #161b21; --ink: #e4e8ec; --muted: #98a3b0; --line: #29313a;
+  --accent: #d6a447; --accent-ink: #1a1408; --ok: #5cbd84; --bad: #e57a62;
+  --stage: #12171c; --grid: #232b33; --grid-strong: #34404b; color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; }
+.app {
+  height: 100%; box-sizing: border-box; display: grid; gap: 16px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  padding-block: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.panel { display: flex; flex-direction: column; gap: 18px; overflow-y: auto; min-width: 0; padding-right: 4px; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.45rem; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { margin: 6px 0 0; color: var(--muted); line-height: 1.5; max-width: 60ch; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+select, input[type="number"] {
+  font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 9px; width: 100%; box-sizing: border-box;
+}
+input[type="number"] { font-family: var(--font-data); }
+.params { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+.params label { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-data); font-size: 0.8rem; color: var(--muted); }
+.buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button {
+  font: inherit; font-weight: 500; cursor: pointer; border-radius: 6px; padding: 9px 10px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+button:hover { filter: brightness(1.06); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wide { grid-column: 1 / -1; }
+.step { display: flex; align-items: center; gap: 10px; font-family: var(--font-data); font-size: 0.8rem; color: var(--muted); }
+.step input { flex: 1; accent-color: var(--accent); }
+.status { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-family: var(--font-data); font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; font-family: var(--font-body); font-weight: 500; font-size: 0.78rem; }
+.chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip.ok { color: var(--ok); }
+.chip.bad { color: var(--bad); }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { color: var(--muted); padding-right: 10px; white-space: nowrap; }
+td:last-child { font-family: var(--font-data); text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
+.warn { color: var(--bad); font-size: 0.8rem; margin: 0; }
+.stage { position: relative; min-width: 0; min-height: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--stage); }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.hud { position: absolute; left: 12px; bottom: 10px; font-family: var(--font-data); font-size: 0.75rem; color: var(--muted); pointer-events: none; }
+kbd { font-family: var(--font-data); font-size: 0.72rem; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+@media (max-width: 760px) {
+  html, body { height: auto; }
+  .app { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .stage { height: 58vh; order: -1; }
+  .panel { overflow: visible; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <aside class="panel">
+    <header>
+      <h1>Configuration Explorer</h1>
+      <p class="lede">Every pose drawn here satisfies all the joints, limits and collision rules of the mechanism. Sample anywhere in its configuration space, or step to a nearby pose.</p>
+    </header>
+
+    <div class="group">
+      <label class="label" for="system">Mechanism</label>
+      <select id="system"></select>
+    </div>
+
+    <div class="group" id="paramGroup">
+      <span class="label">Parameters</span>
+      <div class="params" id="params"></div>
+      <p class="warn" id="paramWarn" hidden></p>
+    </div>
+
+    <div class="group">
+      <span class="label">Sample</span>
+      <div class="buttons">
+        <button class="primary" id="global" type="button">Sample anywhere <kbd>G</kbd></button>
+        <button id="local" type="button">Sample nearby <kbd>L</kbd></button>
+        <button class="wide" id="walk" type="button" aria-pressed="false">Random walk <kbd>W</kbd></button>
+      </div>
+      <label class="step" for="step">Step size <input id="step" type="range" min="0.01" max="0.4" step="0.01" value="0.08"> <span id="stepVal">0.08</span></label>
+    </div>
+
+    <div class="group">
+      <span class="label">Current pose</span>
+      <div class="status" id="status"></div>
+      <table id="readout"></table>
+    </div>
+
+    <div class="group" id="notesGroup">
+      <span class="label">Notes</span>
+      <ul class="notes" id="notes"></ul>
+    </div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <canvas id="view" aria-label="3D view of the mechanism"></canvas>
+    <div class="hud">drag to orbit · scroll to zoom · right-drag to pan</div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<script id="cspace-math">
+var CSPACE = (function () {
+  const SYSTEMS = /*SYSTEMS*/;
+
+  const norm2 = v => v.reduce((s, a) => s + a * a, 0);
+  const finite = v => v.every(Number.isFinite);
+  function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  // Gaussian elimination with partial pivoting; A is n x n (copied), b length n.
+  function solve(A, b) {
+    const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      [M[c], M[piv]] = [M[piv], M[c]];
+      const d = M[c][c];
+      if (Math.abs(d) < 1e-300) return null;
+      for (let r = c + 1; r < n; r++) {
+        const f = M[r][c] / d;
+        if (f !== 0) for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+      }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) {
+      let s = M[r][n];
+      for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
+      x[r] = s / M[r][r];
+    }
+    return x;
+  }
+  function residual(sys, x, p) {
+    const F = sys.F(x, p), G = sys.G(x, p);
+    return { F, G, r: F.concat(G.map(g => Math.min(g, 0))) };
+  }
+  function jacobian(sys, x, p, G) {
+    const J = sys.J(x, p), JG = sys.JG(x, p), n = x.length;
+    return J.concat(JG.map((row, i) => (G[i] < 0 ? row : new Array(n).fill(0))));
+  }
+  // Pull x0 onto {F = 0, G >= 0} with Levenberg-Marquardt.
+  function project(sys, x0, p, iters = 80) {
+    let x = x0.slice(), R = residual(sys, x, p), f = norm2(R.r), lam = 1e-3;
+    const n = x.length;
+    for (let it = 0; it < iters && f > 1e-26 && n > 0; it++) {
+      const J = jacobian(sys, x, p, R.G);
+      const JTJ = Array.from({ length: n }, () => new Array(n).fill(0)), g = new Array(n).fill(0);
+      for (let i = 0; i < J.length; i++) {
+        const row = J[i], ri = R.r[i];
+        for (let a = 0; a < n; a++) {
+          if (row[a] === 0) continue;
+          g[a] += row[a] * ri;
+          for (let b = 0; b < n; b++) JTJ[a][b] += row[a] * row[b];
+        }
+      }
+      let moved = false;
+      for (let t = 0; t < 10; t++) {
+        const A = JTJ.map((row, a) => row.map((v, b) => (a === b ? v * (1 + lam) + lam * 1e-6 + 1e-14 : v)));
+        const d = solve(A, g.map(v => -v));
+        if (!d || !finite(d)) { lam *= 10; continue; }
+        const xn = x.map((v, i) => v + d[i]);
+        const Rn = residual(sys, xn, p), fn = norm2(Rn.r);
+        if (Number.isFinite(fn) && fn < f) { x = xn; R = Rn; f = fn; lam = Math.max(lam / 3, 1e-12); moved = true; break; }
+        lam *= 10;
+      }
+      if (!moved) break;
+    }
+    const maxF = R.F.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    const minG = R.G.reduce((m, v) => Math.min(m, v), Infinity);
+    const clear = sys.OK(x, p);
+    return { x, maxF, minG, clear, ok: finite(x) && maxF < 1e-8 && !(minG < -1e-9) && clear };
+  }
+  const unitScale = (sys, scale) => sys.kinds.map(k => (k === "unit" ? 1 : scale));
+  function globalSample(sys, p, scale, budgetMs = 2500) {
+    const s = unitScale(sys, scale), t0 = performance.now();
+    let tries = 0, lastFail = null;
+    while (performance.now() - t0 < budgetMs) {
+      tries++;
+      const x0 = s.map(si => (Math.random() * 2 - 1) * si * (si === 1 ? 1 : 1.5));
+      const res = project(sys, x0, p);
+      if (res.ok) return Object.assign(res, { tries });
+      lastFail = res;
+      if (sys.vars.length === 0) break;
+    }
+    return Object.assign(lastFail || {}, { ok: false, tries });
+  }
+  // A random step along the tangent space (the null space of the Jacobian), then projection.
+  function localSample(sys, x, p, eps, scale) {
+    const s = unitScale(sys, scale), n = x.length;
+    if (n === 0) return { ok: false, tries: 0 };
+    for (let k = 0; k < 30; k++) {
+      let d = s.map(si => randn() * eps * si);
+      const J = sys.J(x, p), m = J.length;
+      if (m > 0) {
+        const JJt = J.map(r1 => J.map(r2 => r1.reduce((acc, v, i) => acc + v * r2[i], 0)));
+        const tr = JJt.reduce((acc, r, i) => acc + r[i], 0) / m || 1;
+        JJt.forEach((r, i) => { r[i] += 1e-10 * tr; });
+        const y = solve(JJt, J.map(r => r.reduce((acc, v, i) => acc + v * d[i], 0)));
+        if (y && finite(y)) d = d.map((v, i) => v - J.reduce((acc, r, j) => acc + r[i] * y[j], 0));
+      }
+      const res = project(sys, x.map((v, i) => v + d[i]), p);
+      const dist = Math.sqrt(res.x.reduce((acc, v, i) => acc + ((v - x[i]) / s[i]) ** 2, 0));
+      if (res.ok && dist <= 3 * eps * Math.sqrt(n) + 1e-9) return Object.assign(res, { tries: k + 1, dist });
+      eps *= 0.75;
+    }
+    return { ok: false, tries: 30 };
+  }
+  // Local freedoms at x: number of variables minus the rank of the Jacobian.
+  function freedoms(sys, x, p) {
+    const J = sys.J(x, p).map(r => r.slice()), n = x.length;
+    if (!J.length) return n;
+    const big = J.reduce((m, r) => Math.max(m, ...r.map(Math.abs)), 0) || 1;
+    let rank = 0;
+    for (let c = 0; c < n && rank < J.length; c++) {
+      let piv = rank;
+      for (let r = rank + 1; r < J.length; r++) if (Math.abs(J[r][c]) > Math.abs(J[piv][c])) piv = r;
+      if (Math.abs(J[piv][c]) < 1e-7 * big) continue;
+      [J[rank], J[piv]] = [J[piv], J[rank]];
+      for (let r = rank + 1; r < J.length; r++) {
+        const f = J[r][c] / J[rank][c];
+        for (let k = c; k < n; k++) J[r][k] -= f * J[rank][k];
+      }
+      rank++;
+    }
+    return n - rank;
+  }
+  return { SYSTEMS, project, globalSample, localSample, freedoms };
+})();
+</script>
+
+<script>
+(function () {
+  const { SYSTEMS, globalSample, localSample, freedoms } = CSPACE;
+  const $ = id => document.getElementById(id);
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const PART_COLORS = ["#3f6f9f", "#8d3d4a", "#3f8a78", "#6c5c9e", "#a3592e", "#5b7f2e", "#2e7f9b", "#7d6f4e"];
+
+  if (typeof THREE === "undefined") {
+    $("status").innerHTML = '<span class="chip bad">The 3D library did not load</span>';
+    return;
+  }
+
+  // ---------- three.js stage ----------
+  const canvas = $("view"), stage = $("stage");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
+  camera.up.set(0, 0, 1);
+  const controls = new THREE.OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.85));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+  sun.position.set(3, -4, 6);
+  scene.add(sun);
+  let grid = null, root = new THREE.Group();
+  scene.add(root);
+
+  function applyTheme() {
+    scene.background = new THREE.Color(css("--stage"));
+    if (grid) { root.remove(grid); grid.geometry.dispose(); }
+    const size = state.scale * 4;
+    grid = new THREE.GridHelper(size, 20, new THREE.Color(css("--grid-strong")), new THREE.Color(css("--grid")));
+    grid.rotation.x = Math.PI / 2;
+    root.add(grid);
+  }
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / Math.max(h, 1);
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(stage);
+  (function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+
+  // ---------- state ----------
+  const state = { sys: null, p: [], x: null, scale: 1, groups: {}, samples: 0, walk: null };
+
+  function material(color, flag) {
+    return new THREE.MeshStandardMaterial({
+      color, metalness: 0.25, roughness: 0.55, flatShading: true, side: THREE.DoubleSide,
+      transparent: flag === "ghost", opacity: flag === "ghost" ? 0.3 : 1,
+    });
+  }
+  function primMesh(pr, color) {
+    let g;
+    if (pr.type === "box") g = new THREE.BoxGeometry(...pr.size.map(v => Math.max(Math.abs(v), 1e-4)));
+    else if (pr.type === "ball") g = new THREE.SphereGeometry(Math.abs(pr.r), 32, 16);
+    else if (pr.type === "cylinder") { g = new THREE.CylinderGeometry(Math.abs(pr.r), Math.abs(pr.r), Math.abs(pr.h), 40); g.rotateX(Math.PI / 2); }
+    else { g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pr.tris, 3)); g.computeVertexNormals(); }
+    const mesh = new THREE.Mesh(g, material(color, pr.flag));
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.set(...pr.m);
+    return mesh;
+  }
+  function rod(a, b, radius, color) {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), len = A.distanceTo(B);
+    if (len < 1e-9) return null;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len, 16), material(color));
+    mesh.position.copy(A).add(B).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+    return mesh;
+  }
+
+  function sceneScale(bodies) {
+    let m = 0;
+    for (const b of bodies) {
+      for (const f of b.frames) m = Math.max(m, ...f.map(Math.abs));
+      for (const pr of b.prims) {
+        const t = [pr.m[3], pr.m[7], pr.m[11]].map(Math.abs);
+        const ext = pr.type === "box" ? Math.max(...pr.size.map(Math.abs)) : pr.type === "mesh" ? Math.max(...pr.tris.map(Math.abs)) : Math.abs(pr.r) + Math.abs(pr.h || 0);
+        m = Math.max(m, ...t.map(v => v + ext));
+      }
+    }
+    return Math.max(m, 1);
+  }
+
+  function build() {
+    const sys = state.sys;
+    scene.remove(root);
+    root = new THREE.Group();
+    scene.add(root);
+    grid = null;
+    const bodies = sys.geometry(state.p);
+    state.scale = sceneScale(bodies);
+    state.groups = {};
+    const markerR = state.scale * 0.022, rodR = state.scale * 0.012;
+    const brass = new THREE.Color(css("--accent"));
+    let i = 0;
+    for (const b of bodies) {
+      const g = new THREE.Group();
+      g.matrixAutoUpdate = false;
+      const isWorld = b.name === "world";
+      const color = isWorld ? new THREE.Color(css("--muted")) : new THREE.Color(PART_COLORS[i++ % PART_COLORS.length]);
+      for (const pr of b.prims) g.add(primMesh(pr, color));
+      if (!b.prims.length && !isWorld) {
+        const pts = b.frames.length > 1 ? b.frames : [[0, 0, 0]].concat(b.frames);
+        for (let k = 0; k + 1 < pts.length; k++) { const r = rod(pts[k], pts[k + 1], rodR, color); if (r) g.add(r); }
+      }
+      for (const f of b.frames) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(markerR, 16, 10), material(isWorld ? color : brass));
+        s.position.set(...f);
+        g.add(s);
+      }
+      root.add(g);
+      state.groups[b.name] = g;
+    }
+    if (!state.groups.world) {
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(new THREE.SphereGeometry(markerR, 16, 10), material(new THREE.Color(css("--muted")))));
+      root.add(g);
+    }
+    applyTheme();
+    state.framed = false;
+    frameView(new THREE.Box3(new THREE.Vector3(-state.scale, -state.scale, 0), new THREE.Vector3(state.scale, state.scale, 0)));
+  }
+
+  // Aim the camera at a box, from above and in front (z is up).
+  function frameView(box) {
+    const c = box.getCenter(new THREE.Vector3()), r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, state.scale * 0.3);
+    const d = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.05;
+    camera.position.set(c.x + d * 0.35, c.y - d * 0.75, c.z + d * 0.56);
+    camera.near = d / 200; camera.far = d * 50; camera.updateProjectionMatrix();
+    controls.target.copy(c);
+    controls.update();
+  }
+  function frameMechanism() {
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    for (const [name, g] of Object.entries(state.groups)) if (name !== "world" || g.children.length) box.expandByObject(g);
+    if (!box.isEmpty()) frameView(box);
+    state.framed = true;
+  }
+
+  function show(x) {
+    state.x = x;
+    const poses = state.sys.poses(x, state.p);
+    for (const [name, g] of Object.entries(state.groups)) {
+      const m = poses[name];
+      if (m) g.matrix.set(...m); else g.matrix.identity();
+    }
+    readout();
+  }
+
+  // ---------- panel ----------
+  const fmt = (v, d = 3) => (Math.abs(v) < 5e-13 ? "0" : v.toFixed(d));
+  const deg = (c, s) => fmt(Math.atan2(s, c) * 180 / Math.PI, 1) + "°";
+  function describe(vals) {
+    const parts = [];
+    for (const [c, s, label] of [["c", "s", ""], ["c1", "s1", "1: "], ["c2", "s2", "2: "]])
+      if (c in vals) parts.push(label + deg(vals[c], vals[s]));
+    for (const k of ["d", "x", "y", "z"]) if (k in vals) parts.push(`${k} ${fmt(vals[k])}`);
+    if ("q0" in vals) parts.push("q (" + ["q0", "q1", "q2", "q3"].map(k => fmt(vals[k], 2)).join(", ") + ")");
+    return parts.join("  ");
+  }
+  function readout() {
+    const sys = state.sys, x = state.x;
+    const rows = sys.joints.map(j => `<tr><td>${j.name} <span style="opacity:.7">${j.kind}</span></td><td>${describe(j.values(x, state.p))}</td></tr>`);
+    $("readout").innerHTML = rows.join("") || '<tr><td>No joint coordinates</td><td></td></tr>';
+  }
+  function setStatus(res, what) {
+    const sys = state.sys;
+    if (!res.ok) {
+      $("status").innerHTML = `<span class="chip bad">${what === "local" ? "No nearby pose found" : "No pose found"}</span><span>${res.tries || 0} tries · still showing the last valid pose</span>`;
+      return;
+    }
+    const free = freedoms(sys, res.x, state.p);
+    const bits = [`residual ${res.maxF.toExponential(1)}`, `${free} ${free === 1 ? "freedom" : "freedoms"} here`,
+                  `found in ${res.tries} ${res.tries === 1 ? "try" : "tries"}`, `sample ${state.samples}`];
+    $("status").innerHTML = `<span class="chip ok">Valid pose</span><span>${bits.join(" · ")}</span>`;
+  }
+  function sample(kind) {
+    const sys = state.sys;
+    const res = kind === "local" && state.x
+      ? localSample(sys, state.x, state.p, +$("step").value, state.scale)
+      : globalSample(sys, state.p, state.scale);
+    if (res.ok) { state.samples++; show(res.x); if (!state.framed) frameMechanism(); }
+    setStatus(res, kind);
+    return res.ok;
+  }
+  function stopWalk() {
+    if (state.walk) clearInterval(state.walk);
+    state.walk = null;
+    $("walk").setAttribute("aria-pressed", "false");
+  }
+  function toggleWalk() {
+    if (state.walk) return stopWalk();
+    if (!state.x && !sample("global")) return;
+    $("walk").setAttribute("aria-pressed", "true");
+    let fails = 0;
+    state.walk = setInterval(() => { fails = sample("local") ? 0 : fails + 1; if (fails >= 6) stopWalk(); }, 70);
+  }
+
+  function renderParams() {
+    const sys = state.sys, box = $("params");
+    box.innerHTML = "";
+    $("paramGroup").hidden = !sys.params.length;
+    sys.params.forEach((q, i) => {
+      const id = `param-${i}`;
+      const label = document.createElement("label");
+      label.setAttribute("for", id);
+      label.innerHTML = `${q.name}<input id="${id}" type="number" step="0.1" value="${state.p[i]}">`;
+      label.querySelector("input").addEventListener("change", e => {
+        const v = parseFloat(e.target.value);
+        if (!Number.isFinite(v)) return;
+        state.p[i] = v;
+        checkParams();
+        stopWalk(); build(); state.x = null; sample("global");
+      });
+      box.appendChild(label);
+    });
+    checkParams();
+  }
+  function checkParams() {
+    const sys = state.sys, ok = sys.assumptions(state.p);
+    $("paramWarn").hidden = ok;
+    $("paramWarn").textContent = ok ? "" : `These values break the file's assumptions (${sys.assumptionText.join(", ")}); poses may not exist.`;
+  }
+  function renderNotes() {
+    const notes = state.sys.notes;
+    $("notesGroup").hidden = !notes.length;
+    $("notes").innerHTML = notes.map(n => `<li>${n.replace(/[<&]/g, c => (c === "<" ? "&lt;" : "&amp;"))}</li>`).join("");
+  }
+
+  function selectSystem(i) {
+    stopWalk();
+    state.sys = SYSTEMS[i];
+    state.p = state.sys.params.map(q => q.value);
+    state.x = null; state.samples = 0;
+    renderParams(); renderNotes(); build(); resize();
+    sample("global");
+    try { localStorage.setItem("cspace-system", String(i)); } catch (e) { /* storage unavailable */ }
+  }
+
+  SYSTEMS.forEach((s, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = s.name;
+    $("system").appendChild(o);
+  });
+  $("system").addEventListener("change", e => selectSystem(+e.target.value));
+  $("global").addEventListener("click", () => sample("global"));
+  $("local").addEventListener("click", () => sample("local"));
+  $("walk").addEventListener("click", toggleWalk);
+  $("step").addEventListener("input", e => { $("stepVal").textContent = (+e.target.value).toFixed(2); });
+  document.addEventListener("keydown", e => {
+    if (e.target.matches("input, select, textarea") || e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "g") sample("global"); else if (k === "l") sample("local"); else if (k === "w") toggleWalk();
+  });
+  const schemes = window.matchMedia("(prefers-color-scheme: dark)");
+  const retheme = () => { if (state.sys) { applyTheme(); } };
+  schemes.addEventListener && schemes.addEventListener("change", retheme);
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  let start = 0;
+  try { const saved = parseInt(localStorage.getItem("cspace-system"), 10); if (saved >= 0 && saved < SYSTEMS.length) start = saved; } catch (e) { /* storage unavailable */ }
+  $("system").value = String(start);
+  selectSystem(start);
+})();
+</script>

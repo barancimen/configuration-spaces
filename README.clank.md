@@ -34,6 +34,31 @@ smooth points. It sits next to the naive count (6 per body minus each constraint
 codimension), and the two often disagree: Bennett has a naive count of −2 but moves
 with 1 freedom.
 
+## Viewing configurations
+
+```
+python3 -m cspace examples/fourbar.yaml --view          # writes fourbar.html
+python3 -m cspace.viewer -o explorer.html examples/fourbar.yaml:a=2,b=5,c=4,d=6 examples/gears.yaml
+```
+
+The page draws a mechanism at random valid poses. Open it in any browser; no server is needed.
+- **Sample anywhere:** a random start, pulled onto the equations by Levenberg–Marquardt.
+- **Sample nearby:** a random step along the tangent space at the current pose, pulled back
+  and accepted only if it stayed close.
+- **Random walk:** repeats nearby steps.
+- **Parameters** are editable; `path:name=value` sets their starting values.
+
+Each mechanism is compiled into the page as JavaScript: equations, exact Jacobian, limits,
+poses, joint coordinates and shapes. Every shown pose satisfies the equations to about 1e-13,
+the joint limits, and the quantifier-free `no_overlap` conditions.
+
+Limitations:
+- `no_overlap` conditions are only checked, never used to steer sampling, so tight collision
+  constraints may need many tries. Quantified ones are not checked at all.
+- Samples are random but not uniformly distributed over the space.
+- `where` shapes are not drawn, and differences are drawn without the cut.
+- Meant for mechanisms up to tens of variables.
+
 ## Proving claims
 
 ```
