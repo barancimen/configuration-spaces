@@ -32,7 +32,8 @@ def loop_error(m, d):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("model", help="MJCF file written by cspace.mjcf")
-    ap.add_argument("--seconds", type=float, default=10.0)
+    ap.add_argument("--seconds", type=float, default=None,
+                    help="simulated time to run (default: until the viewer is closed, or 10 s without it)")
     ap.add_argument("--wiggle", action="store_true", help="drive every position actuator with a sine wave")
     ap.add_argument("--amplitude", type=float, default=0.15, help="sine amplitude, in joint units")
     ap.add_argument("--frequency", type=float, default=0.3, help="sine frequency in Hz")
@@ -58,10 +59,11 @@ def main():
                 d.ctrl[i] = target
 
     report_every, next_report = 0.5, 0.5
+    limit = args.seconds if args.seconds is not None else (math.inf if args.view else 10.0)
     if args.view:
         from mujoco import viewer as mj_viewer   # binds only mj_viewer, not the name `mujoco`
         with mj_viewer.launch_passive(m, d) as viewer:
-            while viewer.is_running() and d.time < args.seconds:
+            while viewer.is_running() and d.time < limit:
                 start = time.time()
                 control()
                 mujoco.mj_step(m, d)
@@ -70,13 +72,16 @@ def main():
                     print(f"t = {d.time:.2f} s   loop error {loop_error(m, d):.2e}")
                     next_report += report_every
                 time.sleep(max(0.0, m.opt.timestep - (time.time() - start)))
+            reason = "the viewer was closed" if d.time < limit else f"--seconds {limit:g} reached"
     else:
-        while d.time < args.seconds:
+        while d.time < limit:
             control()
             mujoco.mj_step(m, d)
             if d.time >= next_report:
                 print(f"t = {d.time:.2f} s   loop error {loop_error(m, d):.2e}")
                 next_report += report_every
+        reason = f"{limit:g} s simulated" + ("" if args.seconds is not None else " (the default; set --seconds)")
+    print(f"stopped at t = {d.time:.2f} s: {reason}; final loop error {loop_error(m, d):.2e}")
 
 
 if __name__ == "__main__":
