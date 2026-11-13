@@ -70,8 +70,10 @@ Limitations:
 - Samples are random but not uniformly distributed over the space.
 - `where` shapes are not drawn, and differences are drawn without the cut.
 - Meant for mechanisms up to tens of variables.
-- Drawn with the browser's 2D canvas (no WebGL or external libraries), so it works everywhere;
-  overlapping solids are depth-sorted face by face, which can misorder interpenetrating parts.
+- Drawn with WebGL (no external libraries), where a depth buffer decides per pixel what hides
+  what. A browser without WebGL gets the same picture painted face by face, back to front, on a
+  2D canvas; that misorders some faces of parts that touch or reach into each other, and the
+  order can flip from frame to frame.
 
 ## Simulating in MuJoCo
 
@@ -167,6 +169,7 @@ python3 examples/make_helixturm.py > examples/helixturm.yaml        # the genera
 python3 -m cspace.mjcf examples/helixturm.yaml -o helixturm.xml
 python3 examples/run_helixturm.py helixturm.xml --push 10 --record run.npz   # build it, check it
 python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html   # watch it
+MUJOCO_GL=egl python3 examples/render_helixturm.py helixturm.xml run.npz --rewind -o helixturm.gif   # film it
 python3 -m cspace examples/helixturm_lock.yaml --prove              # the lock, decided by z3
 ```
 
@@ -217,6 +220,22 @@ own radial direction. Two later segments then pin it, each coming in along a dir
 
 The plane-motion model treats a round pin between two rails as a point in a channel as wide as
 the clearance. With the real shapes and turning together, z3 did not finish in six minutes.
+
+**Twice as high.** `make_helixturm.py --turns 6` stores six segments per magazine (36 segments,
+48 kg in all). The same machine builds that tower too: the head rises 1440.00 mm in 58 s and
+stays level (tilt 0.00°), and with the rotor stopped nothing moves more than 0.17 mm. The peak
+torque on the cam is 38 N m; of 415 J of work, 309 J became height. The joints' play adds up
+with height, though: the top ends up turned by 0.4° about the axis and 1.2 mm off it. That puts
+two segments of the first turn 2.2 and 2.3 mm sideways of their place, so `run_helixturm.py`,
+whose limit is 2 mm for every segment, counts 34 of 36 and reports the run as failed.
+
+**Filming it.** `examples/render_helixturm.py` draws a recording with MuJoCo's own renderer and
+writes an animated GIF (it needs Pillow and ffmpeg; `MUJOCO_GL=egl` draws without a display).
+There are two views side by side: the whole tower, and its base from closer up. The walls of the
+columns that face the camera are translucent, nearly clear in the close view, so the cam, the
+lifters and the latch bolts show. `--speed` sets how many times faster than real time it plays
+(default 5). `--rewind` then runs the pictures backwards to the start, so the loop has no jump;
+that half is the recording in reverse order, not a simulation of the tower coming down.
 
 **What it is not.**
 - **It only extends.** The latch bolts work one way. Zuse's lifting arms were moved in and out by
@@ -473,4 +492,6 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider --asse
 ```
 
 `tests/test_helixturm.py` takes about a minute. Its MuJoCo run (two steps of a small tower) is
-skipped when MuJoCo is not installed.
+skipped when MuJoCo is not installed, and its GIF test also when Pillow, ffmpeg or an OpenGL
+context is missing. The page's WebGL drawing has no automated test; it was checked by eye in
+headless Chromium against the 2D fallback.

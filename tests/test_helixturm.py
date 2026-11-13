@@ -1,5 +1,7 @@
-"""The helix tower: the generated files, its start pose, the lock proofs, a short MuJoCo run and
-the replay page."""
+"""The helix tower: the generated files, its start pose, the lock proofs, a short MuJoCo run, the
+replay page and the GIF renderer."""
+import os
+import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -13,6 +15,7 @@ from test_mjcf import geom_vertices, interiors_meet, keyframes, mj_fk, vec
 
 MAKE = EXAMPLES / "make_helixturm.py"
 RUN = EXAMPLES / "run_helixturm.py"
+RENDER = EXAMPLES / "render_helixturm.py"
 
 
 def generate(*args):
@@ -160,3 +163,28 @@ def test_replay_page(small, tmp_path):
     assert "replay: {dt: 0.04, frames: [[" in html and 'id="replayPlay"' in html
     plain = page([(EXAMPLES / "gears.yaml", {})])
     assert "replay: null" in plain
+
+
+def test_render_gif(small, tmp_path):
+    """Three recorded frames, drawn by MuJoCo without a display, forwards and then backwards."""
+    pytest.importorskip("mujoco")
+    Image = pytest.importorskip("PIL.Image")
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg is not installed")
+    _, model, _, ex, xs = small
+    q0 = np.array(ex.qpos(xs[0], xs[0]))
+    q1 = q0.copy()
+    q1[0] += 0.5
+    rec, gif = tmp_path / "run.npz", tmp_path / "tower.gif"
+    np.savez(rec, time=np.array([0.0, 0.04, 0.08]), qpos=np.array([q0, q1, q0]))
+    run = subprocess.run([sys.executable, str(RENDER), str(model), str(rec), "-o", str(gif), "--speed", "1", "--rewind",
+                          "--pause", "0", "--height", "160"], capture_output=True, text=True, timeout=300,
+                         env={**os.environ, "MUJOCO_GL": os.environ.get("MUJOCO_GL", "egl")})
+    if run.returncode != 0 and "GL" in run.stderr:
+        pytest.skip("no OpenGL context on this machine: " + run.stderr.strip().splitlines()[-1])
+    assert run.returncode == 0, run.stdout[-2000:] + run.stderr[-2000:]
+    with Image.open(gif) as im:
+        assert im.n_frames == 6 and im.size[1] == 160 and im.size[0] > 160
+        im.seek(1)
+        colours = im.convert("RGB").getcolors(maxcolors=100000)
+    assert len(colours) > 20                              # a drawn scene, not an empty picture

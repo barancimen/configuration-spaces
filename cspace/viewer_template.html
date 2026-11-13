@@ -327,11 +327,13 @@ var CSPACE = (function () {
   function cylFaces(r, h, m, k = 28) {
     const out = [], ring = z => Array.from({ length: k }, (_, i) => [r * Math.cos(2 * Math.PI * i / k), r * Math.sin(2 * Math.PI * i / k), z]);
     const top = ring(h / 2), bot = ring(-h / 2);
-    out.push({ n: turn(m, [0, 0, 1]), pts: top.map(p => apply(m, p)), cull: true });
-    out.push({ n: turn(m, [0, 0, -1]), pts: bot.slice().reverse().map(p => apply(m, p)), cull: true });
+    // edges: which sides of a face get an outline in WebGL (default: all). A cylinder's rims do, the
+    // seams between the flat strips of its side do not.
+    out.push({ n: turn(m, [0, 0, 1]), pts: top.map(p => apply(m, p)), cull: true, edges: [] });
+    out.push({ n: turn(m, [0, 0, -1]), pts: bot.slice().reverse().map(p => apply(m, p)), cull: true, edges: [] });
     for (let i = 0; i < k; i++) {
       const j = (i + 1) % k, a = 2 * Math.PI * (i + 0.5) / k;
-      out.push({ n: turn(m, [Math.cos(a), Math.sin(a), 0]), pts: [bot[i], bot[j], top[j], top[i]].map(p => apply(m, p)), cull: true });
+      out.push({ n: turn(m, [Math.cos(a), Math.sin(a), 0]), pts: [bot[i], bot[j], top[j], top[i]].map(p => apply(m, p)), cull: true, edges: [0, 2] });
     }
     return out;
   }
@@ -344,8 +346,12 @@ var CSPACE = (function () {
     return out;
   }
 
-  // ---------- the stage: an orthographic camera drawn with the 2D canvas ----------
-  const canvas = $("view"), stage = $("stage"), ctx = canvas.getContext("2d");
+  // ---------- the stage: an orthographic camera ----------
+  // Drawn with WebGL, where a depth buffer decides per pixel what hides what. Without WebGL the
+  // faces are painted back to front on a 2D canvas, which gets some overlapping faces wrong.
+  const canvas = $("view"), stage = $("stage");
+  const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+  const ctx = gl ? null : canvas.getContext("2d");
   const view = { yaw: -1.13, pitch: 0.6, zoom: 1, pan: [0, 0], center: [0, 0, 0], radius: 1 };
   let dirty = true;
   const redraw = () => { dirty = true; };
@@ -365,7 +371,170 @@ var CSPACE = (function () {
 
   const state = { sys: null, p: [], x: null, scale: 1, bodies: [], samples: 0, walk: null, framed: false };
 
+  // WebGL: one program. A vertex is a position, the normal of its face and how the face is seen.
+  let G = null;
+  function setupGL() {
+    const compile = (type, src) => {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src); gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error("shader: " + gl.getShaderInfoLog(sh));
+      return sh;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, `
+      attribute vec3 pos, nrm;
+      attribute float side;      // 0: a face seen from outside only, 1: from both sides, 2: no face (lines, dots), 3: rounded
+      uniform mat4 pose, cam;    // body to world, world to the screen
+      uniform vec3 eye, light;   // unit vectors toward the camera and the light
+      uniform vec4 color;
+      uniform float lit, bias, size;
+      varying mediump vec4 tint;
+      void main() {
+        vec3 n = (pose * vec4(nrm, 0.0)).xyz;
+        float facing = dot(n, eye);
+        if (side > 0.5 && side < 1.5 && facing < 0.0) n = -n;
+        float k = mix(1.0, 0.55 + 0.5 * max(0.0, dot(n, light)), lit);
+        tint = vec4(min(color.rgb * k, vec3(1.0)), color.a);
+        gl_Position = cam * (pose * vec4(pos, 1.0));
+        gl_Position.z -= bias;
+        gl_PointSize = size;
+        if (side < 0.5 && facing <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);   // turned away: not drawn
+      }`));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, `
+      precision mediump float;
+      varying mediump vec4 tint;
+      uniform float disc;        // for points. 1: a round dot, 2: one with a dark rim
+      void main() {
+        vec4 c = tint;
+        if (disc > 0.5) {
+          vec2 q = gl_PointCoord - 0.5;
+          float r2 = dot(q, q);
+          if (r2 > 0.25) discard;
+          if (disc > 1.5 && r2 > 0.17) c.rgb *= 0.6;
+        }
+        gl_FragColor = c;
+      }`));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error("shader: " + gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    const U = {};
+    for (const name of ["pose", "cam", "eye", "light", "color", "lit", "bias", "size", "disc"]) U[name] = gl.getUniformLocation(prog, name);
+    const A = ["pos", "nrm", "side"].map(name => gl.getAttribLocation(prog, name));
+    A.forEach(a => gl.enableVertexAttribArray(a));
+    G = { U, A, buffers: [], scratch: gl.createBuffer(), grid: null, axes: null };
+  }
+  const FLOATS = 7;                                             // per vertex: position, normal, side
+  function ballTriangles(c, r, out) {
+    const at = (i, j, m = 10, k = 16) => {
+      const t = Math.PI * i / m, a = 2 * Math.PI * j / k, n = [Math.sin(t) * Math.cos(a), Math.sin(t) * Math.sin(a), Math.cos(t)];
+      return [c[0] + r * n[0], c[1] + r * n[1], c[2] + r * n[2], ...n, 3];
+    };
+    for (let i = 0; i < 10; i++) for (let j = 0; j < 16; j++)
+      out.push(...at(i, j), ...at(i + 1, j), ...at(i + 1, j + 1), ...at(i, j), ...at(i + 1, j + 1), ...at(i, j + 1));
+  }
+  // Copy the bodies' faces, their outlines and their markers to the graphics card (once per build).
+  function upload() {
+    G.buffers.forEach(b => gl.deleteBuffer(b));
+    G.buffers = [];
+    const store = data => {
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+      G.buffers.push(buf);
+      return { buf, n: data.length / FLOATS };
+    };
+    for (const b of state.bodies) {
+      const tris = [], lines = [], dots = [];
+      for (const f of b.faces) {
+        const tail = [...f.n, f.cull ? 0 : 1];
+        for (let i = 1; i + 1 < f.pts.length; i++) tris.push(...f.pts[0], ...tail, ...f.pts[i], ...tail, ...f.pts[i + 1], ...tail);
+        for (const i of f.edges || f.pts.keys()) lines.push(...f.pts[i], ...tail, ...f.pts[(i + 1) % f.pts.length], ...tail);
+      }
+      for (const s of b.balls) ballTriangles(s.c, s.r, tris);
+      for (const m of b.markers) dots.push(...m, 0, 0, 0, 2);
+      b.gl = { tris: store(tris), lines: store(lines), dots: store(dots) };
+    }
+    const L = state.scale * 2, step = state.scale / 5, grid = [], axes = [];   // floor grid in the xy plane
+    for (let v = -L; v <= L + 1e-9; v += step)
+      (Math.abs(v) < 1e-9 ? axes : grid).push(v, -L, 0, 0, 0, 0, 2, v, L, 0, 0, 0, 0, 2, -L, v, 0, 0, 0, 0, 2, L, v, 0, 0, 0, 0, 2);
+    G.grid = store(grid); G.axes = store(axes);
+  }
+  const columns = m => [m[0], m[4], m[8], 0, m[1], m[5], m[9], 0, m[2], m[6], m[10], 0, m[3], m[7], m[11], 1];
+  function drawGL() {
+    const cam = camera(), dpr = Math.min(window.devicePixelRatio || 1, 2), { U, A } = G, { r, u, d } = cam;
+    const paint = (part, mode, o) => {
+      if (!part || !part.n) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, part.buf);
+      gl.vertexAttribPointer(A[0], 3, gl.FLOAT, false, 4 * FLOATS, 0);
+      gl.vertexAttribPointer(A[1], 3, gl.FLOAT, false, 4 * FLOATS, 12);
+      gl.vertexAttribPointer(A[2], 1, gl.FLOAT, false, 4 * FLOATS, 24);
+      gl.uniformMatrix4fv(U.pose, false, o.pose || columns(I4));
+      gl.uniform4f(U.color, o.color[0] / 255, o.color[1] / 255, o.color[2] / 255, o.alpha === undefined ? 1 : o.alpha);
+      gl.uniform1f(U.lit, o.lit ? 1 : 0); gl.uniform1f(U.bias, o.bias || 0);
+      gl.uniform1f(U.size, o.size || 1); gl.uniform1f(U.disc, o.disc || 0);
+      gl.drawArrays(mode, 0, part.n);
+    };
+    const scratch = data => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, G.scratch);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.DYNAMIC_DRAW);
+      return { buf: G.scratch, n: data.length / FLOATS };
+    };
+    const bg = rgb(css("--stage"));
+    gl.viewport(0, 0, cam.W, cam.H);
+    gl.clearColor(bg[0] / 255, bg[1] / 255, bg[2] / 255, 1);
+    gl.depthMask(true);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // world to screen: the same projection as camera().project, depth scaled to reach all bodies
+    const c = view.center, far = 4 * state.scale + Math.hypot(...c), sx = 2 * cam.s / cam.W, sy = 2 * cam.s / cam.H;
+    gl.uniformMatrix4fv(U.cam, false, [
+      sx * r[0], sy * u[0], -d[0] / far, 0,
+      sx * r[1], sy * u[1], -d[1] / far, 0,
+      sx * r[2], sy * u[2], -d[2] / far, 0,
+      2 * view.pan[0] / cam.W - sx * dot(c, r), -2 * view.pan[1] / cam.H - sy * dot(c, u), dot(c, d) / far, 1]);
+    gl.uniform3fv(U.eye, d);
+    gl.uniform3fv(U.light, unit([0.35, -0.5, 0.8]));
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);            // the grid lies behind everything
+    paint(G.grid, gl.LINES, { color: rgb(css("--grid")) });
+    paint(G.axes, gl.LINES, { color: rgb(css("--grid-strong")) });
+    if (!state.x) return;
+    const poses = state.sys.poses(state.x, state.p);
+    const list = state.bodies.map(b => { const P = b.name === "world" ? I4 : (poses[b.name] || I4); return { b, P, pose: columns(P) }; });
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);  // faces a little back, so their outlines show
+    for (const { b, pose } of list) if (b.alpha === 1) paint(b.gl.tris, gl.TRIANGLES, { pose, color: b.color, lit: true });
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    const wide = Math.max(3 * dpr, state.scale * 0.024 * cam.s);                 // bodies without a shape: bars between their frames
+    for (const { b, P } of list) {
+      if (!b.rods.length) continue;
+      const bars = [], ends = [];
+      for (const [p1, p2] of b.rods) {
+        const a = apply(P, p1), e = apply(P, p2), w = unit(cross(sub(e, a), d)).map(v => v * wide / cam.s / 2);
+        for (const [q, k] of [[a, -1], [a, 1], [e, 1], [a, -1], [e, 1], [e, -1]]) bars.push(q[0] + k * w[0], q[1] + k * w[1], q[2] + k * w[2], 0, 0, 0, 2);
+        ends.push(...a, 0, 0, 0, 2, ...e, 0, 0, 0, 2);
+      }
+      paint(scratch(bars), gl.TRIANGLES, { color: b.color });
+      paint(scratch(ends), gl.POINTS, { color: b.color, size: wide, disc: 1 });
+    }
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    const edge = { color: [0, 0, 0], alpha: Math.min(0.36, 0.04 + 0.144 * dpr) };
+    for (const { b, pose } of list) if (b.alpha === 1) paint(b.gl.lines, gl.LINES, { pose, ...edge });
+    for (const { b, pose } of list) {                            // see-through bodies last, over the solid ones
+      if (b.alpha === 1) continue;
+      paint(b.gl.tris, gl.TRIANGLES, { pose, color: b.color, alpha: b.alpha, lit: true });
+      paint(b.gl.lines, gl.LINES, { pose, ...edge });
+    }
+    gl.disable(gl.BLEND); gl.depthMask(true);
+    const dot2 = 2 * Math.max(3.5 * dpr, state.scale * 0.024 * cam.s);            // frame markers, just in front of their place
+    for (const { b, pose } of list) paint(b.gl.dots, gl.POINTS, { pose, color: rgb(b.markerColor), size: dot2, disc: 2, bias: 0.0005 });
+  }
+  if (gl) {
+    setupGL();
+    canvas.addEventListener("webglcontextlost", e => e.preventDefault());
+    canvas.addEventListener("webglcontextrestored", () => { setupGL(); if (state.bodies.length) upload(); redraw(); });
+  }
+
   function draw() {
+    if (gl) return drawGL();
     const cam = camera(), dpr = Math.min(window.devicePixelRatio || 1, 2);
     ctx.fillStyle = css("--stage");
     ctx.fillRect(0, 0, cam.W, cam.H);
@@ -481,6 +650,7 @@ var CSPACE = (function () {
     });
     if (!state.bodies.some(b => b.name === "world"))
       state.bodies.push({ name: "world", color: rgb(muted), alpha: 1, faces: [], balls: [], rods: [], markers: [[0, 0, 0]], markerColor: muted });
+    if (gl) upload();
     state.framed = false;
     view.center = [0, 0, 0]; view.radius = state.scale; view.zoom = 1; view.pan = [0, 0];
     redraw();
