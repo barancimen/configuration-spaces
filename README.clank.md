@@ -1,38 +1,42 @@
 # cspace
 
-Describe rigid solids and the constraints between them; get the **configuration space** of
-the mechanism as exact polynomial equations and inequalities, and prove or refute claims
-about it. Nothing is simulated: no motion, no forces.
+cspace works out the configuration space of a mechanism, which is the set of all poses its
+parts can take. You describe rigid bodies and the constraints between them in a YAML file.
+cspace turns the description into polynomial equations and inequalities with exact
+coefficients. It can also prove or disprove statements about the result.
+
+cspace does not simulate motion or forces. It can export a mechanism to MuJoCo, which does.
 
 ```
 python3 -m cspace examples/fourbar.yaml               # writes fourbar.json
-python3 -m cspace examples/bennett.yaml -o - --check  # print it; also measure the dimension
-python3 -m cspace examples/cube_on_cube.yaml --prove  # decide the file's claims
+python3 -m cspace examples/bennett.yaml -o - --check  # prints it and also measures the dimension
+python3 -m cspace examples/cube_on_cube.yaml --prove  # decides the claims in the file
 ```
 
-Requires Python 3.10+, SymPy, PyYAML, NumPy, SciPy and z3.
+It needs Python 3.10 or later, SymPy, PyYAML, NumPy, SciPy and z3.
 
-## What comes out
+## Output
 
-A semialgebraic set: a list of variables, polynomial equations `= 0`, and a boolean
-combination of polynomial inequalities, written as JSON with SymPy-readable strings:
+The output is a semialgebraic set written as JSON. It has a list of variables, polynomial
+equations that must equal zero, and a boolean combination of polynomial inequalities. All
+expressions are strings that SymPy can read.
 
 | Key | Content |
 |---|---|
-| `parameters`, `assumptions` | symbolic parameters and what the file assumes about them |
+| `parameters`, `assumptions` | the symbolic parameters and what the file assumes about them |
 | `variables` | the coordinates of the space |
-| `equations` | each polynomial that must vanish (unit-circle and unit-quaternion relations included) |
-| `inequalities` | each `g` with `g >= 0`, from joint ranges and cones |
-| `formulas` | `no_overlap` conditions |
-| `poses` | each body's 4×4 world pose as polynomials in the variables |
-| `coordinates` | every joint's coordinates (cosine, sine, displacement) as polynomials, including joints that close loops |
-| `shapes` | each body's solid as a predicate in body coordinates `x, y, z` |
+| `equations` | the polynomials that must be zero, including the unit-circle and unit-quaternion relations |
+| `inequalities` | each `g` that must satisfy `g >= 0`, from joint ranges and cones |
+| `formulas` | the `no_overlap` conditions |
+| `poses` | the 4×4 world pose of each body, as polynomials in the variables |
+| `coordinates` | the coordinates of every joint (cosine, sine, displacement) as polynomials, including joints that close loops |
+| `shapes` | the solid of each body, as a condition on the body coordinates `x, y, z` |
 
-The `--check` diagnostic samples real points numerically. At each point it reports the
-number of variables minus the rank of the Jacobian, which is the local dimension at
-smooth points. It sits next to the naive count (6 per body minus each constraint's
-codimension), and the two often disagree: Bennett has a naive count of −2 but moves
-with 1 freedom.
+`--check` samples points of the set numerically. At each point it reports the number of
+variables minus the rank of the Jacobian. At a smooth point this is the local dimension. Next
+to it, it prints the simple count, which is 6 per body minus the number of freedoms each
+constraint removes. The two numbers often differ. For the Bennett linkage the simple count is
+−2, but the linkage moves with one degree of freedom.
 
 ## Viewing configurations
 
@@ -41,39 +45,49 @@ python3 -m cspace examples/fourbar.yaml --view          # writes fourbar.html
 python3 -m cspace.viewer -o explorer.html examples/fourbar.yaml:a=2,b=5,c=4,d=6 examples/gears.yaml
 ```
 
-The page draws a mechanism at random valid poses. Open it in any browser; no server is needed.
-- **Sample anywhere:** a random start, pulled onto the equations by Levenberg–Marquardt.
-- **Sample nearby:** a random step along the tangent space at the current pose, pulled back
-  and accepted only if it stayed close.
-- **Random walk:** repeats nearby steps.
-- **Parameters** are editable; `path:name=value` sets their starting values.
-- A body may set `color: "#rrggbb"` for drawing; otherwise colours come from a palette.
+The page draws a mechanism at random valid poses. It opens in any browser and needs no server.
 
-Each mechanism is compiled into the page as JavaScript: equations, exact Jacobian, limits,
-poses, joint coordinates and shapes. Every shown pose satisfies the equations to about 1e-13,
-the joint limits, and the quantifier-free `no_overlap` conditions.
+- The "Sample anywhere" button starts from a random point and moves it onto the equations
+  with the Levenberg–Marquardt method.
+- The "Sample nearby" button takes a random step along the tangent space at the current pose
+  and moves the result back onto the equations. The new pose is accepted only if it stayed
+  close to the old one.
+- The "Random walk" button repeats nearby steps.
+- Parameters can be edited on the page. `path:name=value` on the command line sets their
+  starting values.
+- A body can set `color: "#rrggbb"`. Bodies without one get colours from a palette.
 
-**Replaying a simulation.** `--replay run.npz` makes the page play back a motion recorded from
-MuJoCo instead of sampling:
+Each mechanism is compiled into the page as JavaScript. This includes its equations, the
+exact Jacobian, limits, poses, joint coordinates and shapes. Every pose shown satisfies the
+equations to about 1e-13. It also satisfies the joint limits and those `no_overlap`
+conditions that have no quantifiers.
+
+### Replaying a MuJoCo recording
+
+With `--replay run.npz` the page plays back a motion recorded in MuJoCo and does not sample
+poses.
 
 ```
 python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html
 ```
 
-The file holds the arrays `time` and `qpos`, one row per frame, from a model that `cspace.mjcf`
-exported from the first mechanism listed. The page gets a play button and a time slider. Hinges,
-slides and free bodies are read back; a mechanism with a ball joint in its tree cannot be replayed.
+The file must contain the arrays `time` and `qpos` with one row per frame. They must come
+from a model that `cspace.mjcf` exported from the first mechanism on the command line. The
+page then has a play button and a time slider. Hinges, slides and free bodies can be
+replayed. A mechanism with a ball joint in its tree cannot.
 
-Limitations:
-- `no_overlap` conditions are only checked, never used to steer sampling, so tight collision
-  constraints may need many tries. Quantified ones are not checked at all.
+### Limitations of the viewer
+
+- `no_overlap` conditions are checked after sampling but do not guide it. A mechanism with
+  tight collision constraints may therefore need many tries. Conditions with quantifiers are
+  not checked.
 - Samples are random but not uniformly distributed over the space.
-- `where` shapes are not drawn, and differences are drawn without the cut.
-- Meant for mechanisms up to tens of variables.
-- Drawn with WebGL (no external libraries), where a depth buffer decides per pixel what hides
-  what. A browser without WebGL gets the same picture painted face by face, back to front, on a
-  2D canvas; that misorders some faces of parts that touch or reach into each other, and the
-  order can flip from frame to frame.
+- `where` shapes are not drawn. A `difference` is drawn without the cut.
+- The viewer is meant for mechanisms with up to a few tens of variables.
+- The page draws with WebGL and uses no external libraries. In a browser without WebGL it
+  falls back to a 2D canvas and paints the faces from back to front. The fallback sometimes
+  draws faces in the wrong order where parts touch or overlap, and the order can change
+  from one frame to the next.
 
 ## Simulating in MuJoCo
 
@@ -82,41 +96,49 @@ python3 -m cspace.mjcf examples/stewart.yaml -o stewart.xml --motors leg1,leg2,l
 python3 examples/simulate_mujoco.py stewart.xml --wiggle --view      # needs: pip install mujoco
 ```
 
-`cspace.mjcf` writes MuJoCo's MJCF format.
+`cspace.mjcf` writes a model in MuJoCo's MJCF format. The table shows what each cspace
+feature becomes.
 
 | cspace | MuJoCo |
 |---|---|
 | spanning tree | body tree |
 | revolute, prismatic, spherical, free | hinge, slide, ball, freejoint |
-| universal, cylindrical, planar | several hinges and slides in one body, axes computed at the sample |
+| universal, cylindrical, planar | several hinges and slides in one body, with axes computed at the sample |
 | joint ranges and limits | joint `range` |
-| loop-closing spherical / fixed / revolute | `connect` / `weld` / two `connect`s on the axis |
-| two-joint linear `gear` / `couple` | joint equality |
-| box, ball, cylinder, hull, unions | geoms (hull becomes a mesh) |
+| loop-closing spherical, fixed and revolute joints | `connect`, `weld`, and two `connect`s on the axis |
+| a linear `gear` or `couple` of two joints | joint equality |
+| box, ball, cylinder, hull, unions | geoms (a hull becomes a mesh) |
 | bodies without a shape | thin capsules between their frames |
 | `no_overlap` pairs | the only contact pairs |
 
-**Starting pose.** The model is written at a valid sampled pose, with each hinge and slide's
-`ref` set to its value there. MuJoCo derives loop-closing anchors from that reference pose, so
-every loop starts exactly closed. `--keyframes N` adds more valid samples as keyframes.
+The model is written at a valid sampled pose, and each hinge and slide gets its value at that
+pose as its `ref`. MuJoCo computes the anchors of loop-closing constraints from this
+reference pose, so every loop is closed at the start. `--keyframes N` adds N more valid poses
+as keyframes.
 
-**Motors.** `--motors` adds position actuators. By default the gain is set so gravity moves each
-joint by about 1% of the mechanism's size, with near-critical damping; `--kp` overrides it.
+`--motors` adds position actuators to the listed joints. The default gain lets gravity move
+each joint by about 1% of the mechanism's size, and the damping is close to critical. `--kp`
+sets the gain.
 
-**Mass.** Mass comes from geom volumes at `--density` (default 1000), in the file's length units.
+Mass is computed from the volume of each shape at `--density`. The default density is 1000,
+in the file's length units.
 
-Not exported, reported as warnings:
-- loop-closing prismatic, cylindrical, planar and universal joints (list them so they become tree
-  joints);
-- the implicit constraints (`point_on_line`, `point_on_plane`, `distance`, `parallel`);
-- couplings of more than two joints;
-- cone limits;
-- non-convex shapes (`difference`, `where`).
+The exporter leaves out the following and prints a warning for each:
 
-MuJoCo enforces constraints softly, so loops drift slightly during simulation, and contact
-replaces `no_overlap`.
+- prismatic, cylindrical, planar and universal joints that close a loop. Reorder the
+  constraints so that these joints end up in the spanning tree.
+- the implicit constraints `point_on_line`, `point_on_plane`, `distance` and `parallel`
+- couplings of more than two joints
+- cone limits
+- shapes that are not convex, which are `difference` and `where`
 
-**Simulation-only keys.** None of these change the configuration space, the prover or the viewer:
+MuJoCo enforces constraints approximately, so closed loops drift a little during a
+simulation. Contact between shapes takes the place of `no_overlap`.
+
+### Keys used only for simulation
+
+The keys below are read only by the exporter. They do not change the configuration space,
+the prover or the viewer.
 
 ```yaml
 constraints:
@@ -125,139 +147,181 @@ constraints:
     spring: {stiffness: 0.02, rest: 0.35, damping: 0.001}   # joint stiffness and springref
   - contact: [holdPawl, ratchet]       # these bodies collide in MuJoCo
     friction: 0.2
-start:                                 # initial pose: listed joints held exactly, loops closed
+start:                                 # start pose: the listed joints get these values, loops are closed
   holdPawl: -0.25
-simulation:                            # defaults for the exporter; command-line flags override
+simulation:                            # exporter defaults, which command-line flags override
   gravity: false
   timestep: 0.0005
-  density: 600                         # for the bodies' mass, instead of --density
-  solref: [0.004, 1]                   # how stiff contacts and joint stops are: MuJoCo's time
-                                       # constant (seconds) and damping ratio; solimp: likewise
+  density: 600                         # used for mass in place of --density
+  solref: [0.004, 1]                   # stiffness of contacts and joint stops, as MuJoCo's time
+                                       # constant in seconds and damping ratio. solimp works the same way
   motors: {lever: {kp: 5, damping: 0.05}}
 ```
 
-`contact` differs from `no_overlap`. `no_overlap` restricts the configuration space and is exact,
-but for toothed parts its formulas are far too large. `contact` only tells MuJoCo which shapes
-push on each other.
+`contact` and `no_overlap` are different things. `no_overlap` restricts the configuration
+space and is exact, but its formulas become far too large for parts with teeth. `contact`
+only tells MuJoCo which shapes can push on each other.
 
-`examples/ratchet_drive.yaml` combines all of this in 10 bodies:
-- a motor-driven lever with a spring-loaded drive pawl;
-- a 12-tooth ratchet held by a spring-loaded latch pawl;
-- a 3-gear train;
-- a slider-crank;
-- a detent catch that clicks into a V-notch on the slider.
+`examples/ratchet_drive.yaml` uses all of these keys. It has 10 bodies:
 
-The tests check that its start pose has no contact pair interpenetrating.
+- a lever driven by a motor, with a spring-loaded pawl that drives the ratchet
+- a ratchet with 12 teeth, which a second spring-loaded pawl stops from turning back
+- a train of three gears
+- a slider-crank
+- a spring-loaded catch that clicks into a V-shaped notch on the slider
 
-**How it is tested.** `tests/test_mjcf.py` needs no MuJoCo: it uses a small forward-kinematics
-interpreter that follows MuJoCo's documented conventions. For every keyframe of nine models, it
-reproduces the compiler's body poses to 1e-8. Every connect, weld and joint equality also holds
-in every keyframe. In MuJoCo itself (3.17), the exported four-bar and Stewart platform load and
-run with their loops closed at the start (worst loop error over two seconds of driving: 1.7e-4
-and 2.4e-3 in the files' length units), and the helix tower below is built and checked by
-`tests/test_helixturm.py`.
+The tests check that no pair of contacting bodies overlaps in its start pose.
+
+### How the exporter is tested
+
+`tests/test_mjcf.py` does not need MuJoCo. It contains a small forward-kinematics routine that
+follows MuJoCo's documented conventions. For every keyframe of nine models it reproduces the
+body poses that cspace computed, to within 1e-8. It also checks that every connect, weld and
+joint equality holds in every keyframe.
+
+In MuJoCo 3.17 itself, the exported four-bar linkage and Stewart platform load and run with
+their loops closed at the start. Over two seconds of driving, the largest loop error was
+1.7e-4 for the four-bar and 2.4e-3 for the Stewart platform, in the files' length units.
+`tests/test_helixturm.py` builds and checks the helix tower described below.
 
 ## The helix tower
 
-`examples/helixturm.yaml` is a tower that builds itself upward from stored segments, after Konrad
-Zuse's Helixturm (HT1, 1993). It is described in cspace's format and simulated in MuJoCo with
-gravity, contact, friction, springs and one motor; `examples/helixturm_lock.yaml` proves how its
-segments lock.
+`examples/helixturm.yaml` describes a tower that builds itself upward from stored segments. It
+is based on Konrad Zuse's Helixturm (HT1, 1993). The tower is written in cspace's format and
+simulated in MuJoCo with gravity, contact, friction, springs and one motor. A second file,
+`examples/helixturm_lock.yaml`, holds the proofs of how the segments lock together.
 
 ```
-python3 examples/make_helixturm.py > examples/helixturm.yaml        # the generator; --turns, --columns
-python3 -m cspace.mjcf examples/helixturm.yaml -o helixturm.xml
-python3 examples/run_helixturm.py helixturm.xml --push 10 --record run.npz   # build it, check it
-python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html   # watch it
-MUJOCO_GL=egl python3 examples/render_helixturm.py helixturm.xml run.npz --rewind -o helixturm.gif   # film it
-python3 -m cspace examples/helixturm_lock.yaml --prove              # the lock, decided by z3
+python3 examples/make_helixturm.py > examples/helixturm.yaml        # generate the file (options: --turns, --columns)
+python3 -m cspace.mjcf examples/helixturm.yaml -o helixturm.xml     # export it to MuJoCo
+python3 examples/run_helixturm.py helixturm.xml --push 10 --record run.npz   # build the tower and check it
+python3 -m cspace.viewer --replay run.npz examples/helixturm.yaml -o helixturm.html   # replay it in a browser
+MUJOCO_GL=egl python3 examples/render_helixturm.py helixturm.xml run.npz --rewind -o helixturm.gif   # render a GIF
+python3 -m cspace examples/helixturm_lock.yaml --prove              # prove the lock claims
 ```
 
-**The machine.** 50 bodies: a hexagonal tower with six columns, around a fixed stator.
-- **Rotor:** a staircase cam, turned by the only motor. Per revolution it has six flats joined by
-  six short ramps, then one steep return.
-- **Lifter and bolt** (one pair per column): the lifter slides vertically and its foot rides the cam.
-  It carries a spring-loaded latch bolt that reaches into a segment's window and lifts it by the
-  lintel. The bolt is flat on top and bevelled below, so on the way down it is pushed back, passes
-  the next segment and snaps into that one's window.
-- **Magazine** (one per column): a spring-loaded plate pushes a queue of segments toward the tower.
-- **Segments** (18, free bodies): two legs and a lintel around a window, a finger with a pin at
-  each end, and two slots for neighbours' pins.
-- **Head:** one turn of segment stubs under a cap; its underside is the helix.
+### Parts
 
-**One step** is a sixth of a revolution and adds one segment:
-1. All bolts rest on flats. The column whose bottom has reached one segment height gets the next
-   segment pushed under it by its magazine.
-2. That column's lifter sets it down on the new segment, drops to it and latches.
+The default tower has 50 bodies. It is hexagonal, with six columns of segments around a fixed
+stator.
+
+- The rotor is a staircase-shaped cam, and the only motor turns it. In one revolution the cam
+  has six flat sections joined by six short ramps, followed by one steep drop.
+- Each column has a lifter that slides vertically, with a foot that rides on the cam. The
+  lifter carries a spring-loaded latch bolt. The bolt reaches into the window of a segment and
+  lifts the segment by the lintel above the window. The bolt is flat on top and bevelled
+  underneath. When the lifter moves down, the bevel pushes the bolt back, so the bolt passes
+  the next segment and then snaps into that segment's window.
+- Each column has a magazine, which is a spring-loaded plate that pushes a queue of segments
+  toward the tower.
+- There are 18 segments, and they are free bodies. A segment has two legs and a lintel around
+  a window. At each end it has a finger with a pin, and it has two slots that take the pins of
+  neighbouring segments.
+- The head is the top of the tower. It is a cap with one turn of short segment stubs below
+  it, and the lower edge of these stubs follows the helix.
+
+### How one step works
+
+One step is a sixth of a revolution of the rotor and adds one segment.
+
+1. All bolts rest on flat sections of the cam. One column has risen far enough that its lower
+   edge is one segment height above the floor. The magazine of that column pushes the next
+   segment under it.
+2. The lifter of that column lowers the column onto the new segment. The lifter then drops
+   further, and its bolt latches into the new segment's window.
 3. All six lifters rise by a sixth of a segment height.
 
-Segment *i* goes into column *i* mod 6, so each sits a sixth of a height below the one before it.
+Segment *i* goes into column *i* mod 6. Each segment therefore sits a sixth of a segment
+height lower than the one before it, and the segments form a helix.
 
-**What the simulation shows** (18 segments, one every 1.6 s, 34 kg in all, the head 9 kg):
+### Simulation results
+
+The default run adds 18 segments, one every 1.6 s. All parts together weigh 34 kg, and the
+head accounts for 9 kg of that.
 
 | Check | Result |
 |---|---|
-| Segments within 2 mm and 0.5° of their place | 18 of 18 |
-| Head rise | 720.02 mm (three turns are 720 mm), tilt 0.01°, 0.75 mm off axis |
-| Rotor stopped, tower on its bolts | nothing moves more than 0.12 mm in 1.5 s |
-| 10 N sideways on the head for a second | the head gives 1.8 mm; all segments stay within 5 mm |
-| Motor | peak torque on the cam 27 N m; 156 J of work, of which 111 J became height |
+| Segments within 2 mm and 0.5° of their intended position | 18 of 18 |
+| Rise of the head | 720.02 mm (three turns are 720 mm), with 0.01° of tilt and 0.75 mm off the axis |
+| Movement after the rotor stops, with the tower resting on its bolts | at most 0.12 mm in 1.5 s |
+| A sideways force of 10 N on the head for one second | the head moves 1.8 mm, and every segment stays within 5 mm |
+| Motor | 27 N m peak torque on the cam, and 156 J of work, of which 111 J went into lifting |
 
-A 20 N push makes the head give 8.5 mm: the joints have play, and the push starts to tip the tower.
+With a 20 N push the head moves 8.5 mm. The joints have some play, and at that force the
+tower begins to tip.
 
-**What the prover shows.** A segment's own two pins slide into slots of earlier segments along its
-own radial direction. Two later segments then pin it, each coming in along a direction turned by
-60°: segment *i*+1 at its right end, segment *i*+5 at its lower left corner.
+### What the prover shows
+
+When a segment is pushed in, its two pins slide into slots in earlier segments. Both pins
+move along the segment's own radial direction, so on their own they would let the segment
+slide back out. Two later segments hold it in place. Each of them is pushed in along a
+direction that differs by 60° from the first segment's. Segment *i*+1 pins the right end, and
+segment *i*+5 pins the lower left corner.
 
 | Claim | Model | Answer |
 |---|---|---|
-| `held`: within 6 mm of its place, the segment is within 1 mm (2 mm vertically) | real shapes, no turning | proved |
-| `comesOutLast`: with both later segments drawn out, it slides out | real shapes | proved |
-| `neverComesOut` (false on purpose) | real shapes | refuted |
-| `pinned…` (5 claims): within 0.6 mm and 0.3° when all four pins sit in their channels | plane motion with turning | proved |
-| `swingsWithoutLowerPin`: before segment *i*+5 is in, the left end can swing out | plane motion | proved |
-| `slidesOnItsOwnPins`: on its own two pins it still slides straight out | plane motion | proved |
+| `held`: if the segment is within 6 mm of its position, it is within 1 mm of it (2 mm vertically) | real shapes, no rotation | proved |
+| `comesOutLast`: once both later segments are pulled out, the segment can slide out | real shapes | proved |
+| `neverComesOut`, which is deliberately false | real shapes | refuted |
+| five `pinned…` claims: with all four pins in their channels, the segment is within 0.6 mm and 0.3° of its position | motion in the plane, with rotation | proved |
+| `swingsWithoutLowerPin`: before segment *i*+5 is in place, the left end can swing outward | motion in the plane | proved |
+| `slidesOnItsOwnPins`: held only by its own two pins, the segment can slide straight out | motion in the plane | proved |
 
-The plane-motion model treats a round pin between two rails as a point in a channel as wide as
-the clearance. With the real shapes and turning together, z3 did not finish in six minutes.
+The planar model replaces each round pin between two rails with a point in a channel that is
+as wide as the clearance. When z3 was given the real shapes together with rotation, it did
+not finish within six minutes.
 
-**Twice as high.** `make_helixturm.py --turns 6` stores six segments per magazine (36 segments,
-48 kg in all). The same machine builds that tower too: the head rises 1440.00 mm in 58 s and
-stays level (tilt 0.00°), and with the rotor stopped nothing moves more than 0.17 mm. The peak
-torque on the cam is 38 N m; of 415 J of work, 309 J became height. The joints' play adds up
-with height, though: the top ends up turned by 0.4° about the axis and 1.2 mm off it. That puts
-two segments of the first turn 2.2 and 2.3 mm sideways of their place, so `run_helixturm.py`,
-whose limit is 2 mm for every segment, counts 34 of 36 and reports the run as failed.
+### A taller tower
 
-**Filming it.** `examples/render_helixturm.py` draws a recording with MuJoCo's own renderer and
-writes an animated GIF (it needs Pillow and ffmpeg; `MUJOCO_GL=egl` draws without a display).
-- **Two views** side by side on white, with no lettering: the whole tower, solid, and its base
-  from closer up.
-- **Drawn like a comic:** every part is grey, one shade per kind of part (all segments the same),
-  whatever colours the file gives them, with a black line around every body and along every
-  corner. MuJoCo draws the shaded picture; the script finds the lines afterwards, from how far
-  away each pixel is and which body it shows.
-- **Glass walls:** in the close view the walls on the camera's side of the axis turn to glass
-  during the rotor's first half turn, so the cam, the lifters and the latch bolts show: their
-  shade fades to 5%, their lines stay. These are the segments, magazines, guides and floor of
-  three columns, and that side of the head.
-- **Speed:** `--speed` sets how many times faster than real time it plays (default 4). The time
-  the tower stands still at the end of the recording is left out.
-- **Loop:** `--rewind` then runs the pictures backwards to the start without a pause, so the loop
-  has no jump and the walls come back at its end. That half is the recording in reverse order,
-  not a simulation of the tower coming down.
+`make_helixturm.py --turns 6` puts six segments in each magazine. This gives 36 segments and a
+total mass of 48 kg. The same machine builds this tower as well. The head rises 1440.00 mm in
+58 s with 0.00° of tilt, and after the rotor stops nothing moves more than 0.17 mm. The peak
+torque on the cam is 38 N m. The motor does 415 J of work, of which 309 J goes into lifting.
 
-**What it is not.**
-- **It only extends.** The latch bolts work one way. Zuse's lifting arms were moved in and out by
-  a second cam, which is what lets his tower also retract.
-- **It is not Zuse's geometry.** His segments were slanted sheet-metal parts and the motion was
-  continuous, with eight magazines. Here the segments are boxes, the motion is stepwise, and the
-  generator allows 4 to 6 columns, because the joint has to fit in the corner between two walls.
-- **The lock is proved for one segment and its neighbours,** not for the whole tower, and not
-  against tilting out of the wall's plane. The simulation covers those.
-- **The machine has to be stopped** when the magazines are empty; the run script does that.
-- Contacts in MuJoCo are slightly soft (a 4 ms time constant), and the clearances are 0.2 to
-  2 mm on a 240 mm segment.
+The play in the joints adds up as the tower gets taller. At the end the top is rotated by
+0.4° about the axis and is 1.2 mm off it. Because of this, two segments in the first turn are
+2.2 mm and 2.3 mm sideways from their intended positions. `run_helixturm.py` allows 2 mm for
+every segment, so it counts 34 of 36 and reports that the run failed.
+
+### Rendering a GIF
+
+`examples/render_helixturm.py` renders a recording with MuJoCo's renderer and writes an
+animated GIF. It needs Pillow and ffmpeg. Setting `MUJOCO_GL=egl` lets it render without a
+display.
+
+- The GIF shows two views side by side on a white background, with no text. The left view
+  shows the whole tower. The right view shows the base from closer up.
+- Every part is grey. Each kind of part has its own shade, so all segments have the same
+  shade. The segment stubs of the head count as segments here, and only its cap has a shade
+  of its own. The colours in the YAML file are ignored.
+- Black outlines are drawn around every body and along every edge. MuJoCo renders the shaded
+  image. The script then finds the outlines from the depth of each pixel and the body that
+  the pixel belongs to.
+- In the right view, the walls between the camera and the tower's axis become transparent
+  during the first half turn of the rotor. Their shading fades to 5% opacity and their
+  outlines stay. This makes the cam, the lifters and the latch bolts visible. The walls that
+  fade are the segments, magazines, guides and floor of three columns, and the same side of
+  the head.
+- `--speed` sets the playback speed as a multiple of real time. The default is 4. The end of
+  the recording, where the tower stands still, is left out.
+- `--rewind` plays the frames backwards after the build, without a pause. The GIF then loops
+  smoothly, and the walls become solid again at the end of the loop. The backwards half is
+  the same recording in reverse. It is not a simulation of the tower retracting.
+
+### Limitations of the tower
+
+- The tower can only extend, because the latch bolts work in one direction. In Zuse's machine
+  a second cam moved the lifting arms in and out, which allowed his tower to retract as well.
+- The geometry is not Zuse's. His segments were slanted sheet-metal parts, the motion was
+  continuous, and there were eight magazines. Here the segments are boxes and the motion is
+  stepwise. The generator allows 4 to 6 columns, because the joint has to fit into the corner
+  between two walls.
+- The lock is proved for one segment and its neighbours. It is not proved for the whole
+  tower, and it is not proved against a segment tilting out of the plane of its wall. Only
+  the simulation covers those cases.
+- The rotor has to be stopped when the magazines are empty. The run script does this.
+- Contacts in MuJoCo are slightly soft, with a time constant of 4 ms. The clearances are
+  between 0.2 and 2 mm on a segment that is 240 mm tall.
 
 ## Proving claims
 
@@ -266,7 +330,8 @@ python3 -m cspace examples/cube_on_cube.yaml --prove
 python3 examples/make_snake.py 1000 > snake.yaml && python3 -m cspace snake.yaml --prove -v
 ```
 
-Claims go in the mechanism file under `claims:` (or in a separate file passed with `--claims`):
+Claims are written under `claims:` in the mechanism file, or in a separate file given with
+`--claims`.
 
 ```yaml
 claims:
@@ -278,93 +343,113 @@ claims:
     possible: slideX.d == (A - a)/2 and slideY.d == (A - a)/2
 ```
 
-`always: F` means F holds in every configuration. `possible: F` means F holds in at least
-one configuration. Both are checked for every parameter value that satisfies `assume:`.
+`always: F` states that F is true in every configuration. `possible: F` states that F is true
+in at least one configuration. Both are checked for every parameter value that satisfies the
+file's `assume:` conditions.
 
-Two per-claim options:
-- `assume: "a <= b and ..."` adds conditions on the parameters for this claim only.
-- `given: [joint, ...]` (for `possible` claims) means: for every value of these joints'
-  coordinates allowed by their own limits, some configuration exists that also satisfies
-  F. For example, `given: [crank]` with `possible: "True"` says the crank can turn through
-  its whole range. This puts a second quantifier in front of the configuration, so it is
-  much harder for the solver. It works for small or open systems; on closed loops such as
-  the four-bar it times out.
+A claim can have two options.
 
-Each claim gets one of four answers. All of them come from z3, an automatic theorem prover
-with an exact decision procedure for polynomial arithmetic over the reals.
+- `assume: "a <= b and ..."` adds conditions on the parameters for that claim only.
+- `given: [joint, ...]` applies to `possible` claims. The claim then states that for every
+  value of these joints' coordinates that their own limits allow, there is a configuration
+  that also satisfies F. For example, `given: [crank]` with `possible: "True"` states that the
+  crank can turn through its whole range. This adds a second quantifier, which makes the
+  problem much harder for the solver. It works for small systems and for systems without
+  closed loops. On closed loops such as the four-bar linkage it times out.
+
+All answers come from z3, an automatic theorem prover with an exact decision procedure for
+polynomial arithmetic over the real numbers. Each claim gets one of four answers.
 
 | Answer | Meaning |
 |---|---|
-| `proved` | The claim holds. |
-| `refuted` | It fails; the counterexample is a real configuration. |
-| `unknown` | Neither could be established within the limits. |
-| `error` | The claim could not be read. |
+| `proved` | The claim is true. |
+| `refuted` | The claim is false. The counterexample that is printed is a real configuration. |
+| `unknown` | z3 could not decide the claim within the time limits. |
+| `error` | The claim could not be parsed. |
 
-**Formula language.** The syntax is Python-like, but claims are parsed, never executed.
-- **Arithmetic and logic:** `+ - * / ** ^`, comparisons (chains allowed), `and`, `or`, `not`,
-  `implies(F, G)`, `iff(F, G)`. Division is only allowed by nonzero numbers.
-- **Joint coordinates:** `joint.d`, `joint.c`, `joint.s` (the cosine and sine of a hinge
+The options are `--timeout` for the time limit of one solver call, `--budget` for the time
+limit of one claim, `--max-bodies`, and `-v` to print each attempt.
+
+### Formula language
+
+The syntax looks like Python, but claims are only parsed and never executed.
+
+- Arithmetic and logic: `+ - * / ** ^`, comparisons (which can be chained), `and`, `or`,
+  `not`, `implies(F, G)`, `iff(F, G)`. Division is allowed only by nonzero numbers.
+- Joint coordinates: `joint.d`, `joint.c` and `joint.s` (the cosine and sine of a hinge
   angle), `joint.q0`, …
-- **Positions:** `pos(body)` or `pos(body.frame)`, `point(body, x, y, z)`, `axis(body.frame)`,
+- Positions: `pos(body)` or `pos(body.frame)`, `point(body, x, y, z)`, `axis(body.frame)`,
   `[x, y, z]`, `p.x`, `dot`, `cross`, `norm2`, `dist2`.
-- **Solids:**
-  - `inside(p, B)`: p is in the closed solid; `interior(p, B)`: p is strictly inside
-  - `overlap(A, B)`: the interiors intersect; `meet(A, B)`: the solids touch or intersect
-  - `convex(A, B, …)`: the union of the solids is convex
-- **Quantifiers:** `forall(p, F)` and `exists(p, F)` over points; `forall_real(t, F)` and
-  `exists_real(t, F)` over numbers.
+- Solids:
+  - `inside(p, B)` means p is in the closed solid. `interior(p, B)` means p is strictly inside.
+  - `overlap(A, B)` means the interiors intersect. `meet(A, B)` means the solids touch or
+    intersect.
+  - `convex(A, B, …)` means the union of the solids is convex.
+- Quantifiers: `forall(p, F)` and `exists(p, F)` range over points. `forall_real(t, F)` and
+  `exists_real(t, F)` range over numbers.
 
-A name that is both a body and a joint resolves by context. `.c`, `.d` and the other
-coordinate names refer to the joint, `.frame` refers to the body, and functions such as
-`overlap` and `pos` take the body.
+A name can belong to both a body and a joint. The context decides which one is meant. `.c`,
+`.d` and the other coordinate names refer to the joint. `.frame` refers to the body.
+Functions such as `overlap` and `pos` take the body.
 
-**How it scales.** A claim only needs the bodies it mentions and whatever constrains them.
-1. **Independent groups (exact).** Bodies connected to each other only through the fixed
-   world move independently. A claim only needs the groups of the bodies it mentions.
-2. **Dangling bodies (exact).** A body hanging off by a single joint, with nothing else
-   attached, can always follow the rest, so it is removed. This repeats until nothing
-   dangles.
-3. **Neighbourhoods.** If a group is still larger than `--max-bodies` (default 12), the
-   prover works on the bodies within 0, 1, 2, … steps of the mentioned ones, two ways:
-   - **relaxed:** constraints to the rest are dropped, so there are *more* configurations.
-     A proof of an `always` claim, or a refutation of a `possible` claim, carries over.
-   - **restricted:** the joints of the rest are held at zero, so there are *fewer*
-     configurations. A witness for a `possible` claim, or a counterexample to an `always`
-     claim, is real.
-   - Any other outcome is inconclusive, and the prover widens the neighbourhood.
+### Large mechanisms
 
-On a 1000-link chain (`examples/make_snake.py`), 7 of 8 local claims about links in the
-middle are decided in about 30 s in total. The eighth, `staysInPlane`, is true but stays
-unknown, because proving it requires following the chain all the way to the world.
+To decide a claim, the prover needs only the bodies that the claim mentions and whatever
+constrains them. It reduces the mechanism in three steps.
 
-**Limits.**
-- Statements about the whole of a large connected mechanism stay out of reach. Real
-  arithmetic with quantifiers is decidable, but the cost can grow doubly exponentially
-  with the number of variables.
-- Constants must be algebraic: `sqrt(2)` and `cos(pi/12)` are fine, but `pi` itself and
-  the `--trig` view are not.
-- The prover trusts z3's answers.
-- Each solver call gets a z3 context of its own. Without that, how long z3 took on a claim
-  depended on which claims the same run had asked before it.
+1. Independent groups. Bodies that are connected to each other only through the fixed world
+   move independently. The prover keeps only the groups that contain bodies mentioned in the
+   claim. This step is exact.
+2. Dangling bodies. A body that hangs on a single joint, with nothing else attached to it,
+   can always follow the rest of the mechanism. The prover removes such bodies until none is
+   left. This step is also exact.
+3. Neighbourhoods. If a group still has more than `--max-bodies` bodies (12 by default), the
+   prover works with the bodies within 0, 1, 2, … joints of the mentioned ones. It tries two
+   versions of each neighbourhood.
+   - In the relaxed version, the constraints to the rest of the mechanism are dropped. This
+     allows more configurations than the real mechanism has. A proof of an `always` claim
+     therefore still holds for the whole mechanism, and so does a refutation of a `possible`
+     claim.
+   - In the restricted version, the joints of the rest of the mechanism are held at zero.
+     This allows fewer configurations. A configuration found for a `possible` claim is
+     therefore real, and so is a counterexample to an `always` claim.
+   - Any other result is inconclusive, and the prover tries a larger neighbourhood.
 
-Options: `--timeout` (per solver call), `--budget` (per claim), `--max-bodies`, and `-v`
-to see each attempt.
+`examples/make_snake.py` generates a chain of 1000 links with eight local claims about links
+in the middle. Seven of them are decided in about 30 s in total. The eighth, `staysInPlane`,
+is true but gets the answer `unknown`, because a proof has to follow the chain all the way to
+the world.
+
+### Limits of the prover
+
+- Claims about the whole of a large connected mechanism usually cannot be decided. Real
+  arithmetic with quantifiers is decidable, but the cost can grow doubly exponentially with
+  the number of variables.
+- Constants must be algebraic numbers. `sqrt(2)` and `cos(pi/12)` are allowed. `pi` itself is
+  not allowed, and neither is the `--trig` mode.
+- The prover trusts z3's answers and does not check them independently.
+- Each solver call uses its own z3 context. Before this change, the time z3 needed for a
+  claim depended on which claims had been checked before it in the same run.
 
 ## Coordinates
 
-- An angle is a pair `(c, s)` with `c^2 + s^2 == 1`, so everything stays polynomial.
-- Variables are named role + joint name: `cElbow`, `sElbow` (hinge `elbow`), `dSlide`
-  (slider `slide`), `q0Ball`..`q3Ball` (ball joint), `xPuck`.. (free body).
-- **reduced** (default): joints on a spanning tree from `world` (file order) carry
-  coordinates; every other constraint becomes equations on the resulting poses (loop
-  closure). Bodies that no tree joint reaches get a free joint (position + unit quaternion).
-- **maximal** (`--coords maximal`): every body gets position + unit quaternion, and every
+- An angle is stored as a pair `(c, s)` with `c^2 + s^2 == 1`. This keeps all equations
+  polynomial.
+- A variable is named after its role and its joint. The hinge `elbow` has `cElbow` and
+  `sElbow`, the slider `slide` has `dSlide`, a ball joint `ball` has `q0Ball` to `q3Ball`, and
+  a free body `puck` has `xPuck` and so on.
+- The default mode is called reduced. cspace builds a spanning tree of joints starting from
+  `world`, in file order, and the joints in the tree get coordinates. Every other constraint
+  becomes equations on the resulting poses, which close the loops. A body that no tree joint
+  reaches gets a free joint, with a position and a unit quaternion.
+- With `--coords maximal`, every body gets a position and a unit quaternion, and every
   constraint is an equation between two poses.
-- **trig** (`--trig`): tree hinges get an angle `thElbow` with `Cos`/`Sin` instead of
-  `(c, s)`. This is the only mode for angle–length couplings (screws, rack and pinion) and
-  ranges wider than one turn.
-- Equations are reduced modulo the circle/quaternion relations, have their rational
-  content removed and are deduplicated.
+- With `--trig`, hinges in the tree get an angle variable such as `thElbow`, and the equations
+  use `Cos` and `Sin` in place of `(c, s)`. This mode is required for couplings between an
+  angle and a length, such as screws and rack-and-pinion drives, and for ranges wider than
+  one turn.
+- Equations are reduced modulo the circle and quaternion relations. Their rational content is
+  removed, and duplicates are dropped.
 
 ## Input format (YAML)
 
@@ -388,13 +473,14 @@ constraints:
     range: [-pi/2, pi/2]
 ```
 
-All numbers are exact: `0.1` means 1/10, `pi/3` stays symbolic. A reference is `body.frame`
-or `body`, which means the body's own frame. Names are letters and digits. `x`, `y`, `z`,
-`pi`, `sqrt`, `sin`, `cos` and `tan` are reserved.
+All numbers are exact. `0.1` means 1/10, and `pi/3` stays symbolic. A reference is written
+`body.frame`, or just `body` for the body's own frame. Names consist of letters and digits.
+The names `x`, `y`, `z`, `pi`, `sqrt`, `sin`, `cos` and `tan` are reserved.
 
 ### Pairwise constraints
 
-Each acts on the pose of frame 2 relative to frame 1. Axes are the frames' z axes.
+Each of these constrains the pose of frame 2 relative to frame 1. The axis of a joint is the
+z axis of its frames.
 
 | Kind | Freedoms | Meaning |
 |---|---|---|
@@ -411,16 +497,24 @@ Each acts on the pose of frame 2 relative to frame 1. Axes are the frames' z axe
 | `distance` | 5 | origins at `length: L` |
 | `parallel` | 4 | z axes coincide in direction |
 
-The last four have no coordinates of their own and always close loops.
+The last four are the implicit constraints. They have no coordinates of their own, so they
+always close loops.
 
-Options:
-- `name:` used in variable names and couplings (default `j1`, `j2`, …).
-- `range: [lo, hi]` on the joint's main coordinate (angle, or displacement for `prismatic`).
-- `limits: {angle: [..], d: [..], angle1: [..], angle2: [..]}` for joints with several coordinates.
-- `cone: A` (ball joints): frame 2's z axis stays within angle A of frame 1's z axis.
+A constraint can have these options.
+
+- `name:` is used in variable names and in couplings. The default names are `j1`, `j2`, and
+  so on.
+- `range: [lo, hi]` limits the joint's main coordinate. This is the angle, or the
+  displacement for `prismatic`.
+- `limits: {angle: [..], d: [..], angle1: [..], angle2: [..]}` sets limits on joints with
+  several coordinates.
+- `cone: A` applies to ball joints. It keeps frame 2's z axis within the angle A of frame 1's
+  z axis.
 - `closing: true` keeps a joint out of the spanning tree.
 
-### Couplings (n-ary)
+### Couplings
+
+A coupling relates the coordinates of any number of joints.
 
 ```yaml
 - gear: [pinion, wheel]
@@ -430,78 +524,89 @@ Options:
 - couple: {slide.d: 1, crank.angle: -pitch/(2*pi)}   # needs --trig
 ```
 
-An angle coupling `Σ a_i θ_i = φ` with rational `a_i` becomes `Π z_i^(a_i) = e^(iφ)`, with
-`z = c + i s` and the `a_i` scaled to coprime integers. This is exactly the set of poses the
-real relation reaches. A coupling may refer to a loop-closing joint's coordinate.
+An angle coupling `Σ a_i θ_i = φ` with rational `a_i` becomes `Π z_i^(a_i) = e^(iφ)`, where
+`z = c + i s` and the `a_i` are scaled to coprime integers. The solutions of this equation
+are the same poses that the original relation allows. A coupling may use the coordinate of a
+joint that closes a loop.
 
 ### Shapes and `no_overlap`
 
-Leaves:
-- `box: [lx, ly, lz]` (centred)
+The basic shapes are:
+
+- `box: [lx, ly, lz]`, centred
 - `ball: r`
-- `cylinder: [r, h]` (axis z, centred)
-- `hull: [[x, y, z], …]` (numeric vertices)
-- `where: ["x^2 + y^2 <= 1", "z >= 0"]` (polynomial inequalities)
+- `cylinder: [r, h]`, centred, with its axis along z
+- `hull: [[x, y, z], …]`, with numeric vertices
+- `where: ["x^2 + y^2 <= 1", "z >= 0"]`, given by polynomial inequalities
 
-Combinators are `union`, `intersection` and `difference` (the first child minus the others).
-Any node may carry `at`, `z`, `x`.
+Shapes can be combined with `union`, `intersection` and `difference`. A `difference` is the
+first child minus the others. Any shape can be placed with `at`, `z` and `x`.
 
-`no_overlap: [A, B]` means no point is interior to both bodies:
-- Unions of boxes, hulls and balls give an exact quantifier-free formula: separating
-  axes for polytope pairs, centre distance for ball pairs.
-- Anything else, including a ball against a polytope, gives an exact condition
-  quantified over all points, which the prover handles directly.
+`no_overlap: [A, B]` states that no point is in the interior of both bodies.
+
+- For unions of boxes, hulls and balls, cspace writes an exact formula without quantifiers.
+  It uses separating axes for pairs of polytopes and the distance between centres for pairs
+  of balls.
+- For every other case, including a ball against a polytope, it writes an exact condition
+  that is quantified over all points. The prover works with this condition directly.
 
 ## Examples
 
 | File | Shows |
 |---|---|
-| `two_rods` | the linkage from the request; symbolic lengths, hinge range |
-| `fourbar` | a planar loop; naive count −2, true dimension 1 |
-| `slider_crank` | prismatic joint, displacement range |
-| `bennett` | overconstrained spatial loop that still moves |
-| `rssr` | ball joints, a cone limit, an idle freedom (dimension 2) |
+| `two_rods` | two rods joined by a hinge, with symbolic lengths and a limited hinge range |
+| `fourbar` | a planar closed loop, where the simple count gives −2 and the true dimension is 1 |
+| `slider_crank` | a prismatic joint with a limited displacement |
+| `bennett` | an overconstrained spatial loop that still moves |
+| `rssr` | ball joints, a cone limit, and an idle degree of freedom (dimension 2) |
 | `gears` | a gear coupling between two hinges |
-| `screw` | angle–length coupling (`--trig` only) |
+| `screw` | a coupling between an angle and a length (needs `--trig`) |
 | `tethered_puck` | implicit constraints on a free body |
-| `sliding_boxes` | exact box/box condition (\|s\| ≥ 2) and a `ForAll` fallback |
-| `door_stop` | collision turns a hinge's circle into an arc |
-| `stewart` | 14-body Stewart platform: six closed spatial loops, 37 variables, 6 freedoms |
-| `cube_on_cube` | claims: never convex, never hangs over, a deliberately false claim |
-| `make_snake.py` | generates an N-link chain with local claims (scaling test) |
-| `ratchet_drive` | springs, contacts and a start pose for MuJoCo (from `make_ratchet_drive.py`) |
-| `helixturm` | a self-building tower: 50 bodies, 19 of them free, contacts only (from `make_helixturm.py`; run with `run_helixturm.py`) |
-| `helixturm_lock` | the tower's joints alone, with claims about how they lock |
+| `sliding_boxes` | the exact condition for two boxes (\|s\| ≥ 2), and a quantified condition as the fallback |
+| `door_stop` | a collision that limits a hinge to part of its circle |
+| `stewart` | a Stewart platform with 14 bodies, six closed spatial loops, 37 variables and 6 freedoms |
+| `cube_on_cube` | claims that the cubes are never convex and never overhang, and one claim that is deliberately false |
+| `make_snake.py` | generates a chain of N links with local claims, as a test of scaling |
+| `ratchet_drive` | springs, contacts and a start pose for MuJoCo (generated by `make_ratchet_drive.py`) |
+| `helixturm` | the self-building tower, with 50 bodies, 19 of them free and moved only by contact (generated by `make_helixturm.py`, run with `run_helixturm.py`) |
+| `helixturm_lock` | only the tower's joints, with claims about how they lock |
 
-## Are pairwise constraints enough?
+## Constraints on more than two bodies
 
-For joints, yes: every joint, range and collision is a condition on one relative pose.
-Couplings are the exception. A gear ratio relates two joint angles, which involves three
-or four bodies, and differentials and cable runs involve more. So `couple` and `gear` take
-any number of joints. The space is the intersection of all constraints, and its dimension
-is a global property: the `--check` output above shows it disagreeing with the naive count.
+Every joint, joint range and collision condition involves two bodies. It is a condition on
+the pose of one body relative to the other. Couplings are different. A gear ratio relates two
+joint angles, and those two joints involve three or four bodies. Differentials and cable runs
+involve more. For this reason `couple` and `gear` accept any number of joints.
 
-## Limits
+The configuration space is the set of poses that satisfy all constraints at once. Its
+dimension depends on the whole mechanism and cannot be found by counting constraints one at
+a time. The `--check` output described above shows this.
 
-- Gröbner bases work over the complex numbers; the real dimension can be lower.
-- Unit quaternions cover each rotation twice.
-- Angle–length couplings are not algebraic, so they need `--trig`.
-- Rolling without slipping in 3D constrains velocities, not poses, so it cannot be stated here.
-- `hull` vertices must be numeric. The fallback `ForAll` formulas are exact, but resolving
-  them can be slow.
-- Spec strings are evaluated by SymPy's parser: only compile files you trust.
-- Not included: mesh import, the two-body rolling gear law, cams, a quantifier-free test
-  for a ball against a polytope.
+## General limits
+
+- Gröbner bases are computed over the complex numbers. The dimension of the real solution set
+  can be lower.
+- Unit quaternions represent each rotation twice.
+- Couplings between an angle and a length are not algebraic, so they need `--trig`.
+- Rolling without slipping in 3D is a constraint on velocities and not on poses, so it cannot
+  be expressed.
+- The vertices of a `hull` must be numbers. The quantified formulas used as a fallback are
+  exact, but deciding them can be slow.
+- Strings in a mechanism file are evaluated by SymPy's parser. Only compile files that you
+  trust.
+- These are not supported: importing meshes, the rolling law for two gear bodies, cams as a
+  constraint, and a quantifier-free test for a ball against a polytope.
 
 ## Tests
 
-The installed pytest 5.2 needs plugin autoload off on Python 3.10:
+The pytest installed here is version 5.2. Under Python 3.10 it runs only with plugin
+autoloading turned off.
 
 ```
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q -p no:cacheprovider --assert=plain tests/
 ```
 
-`tests/test_helixturm.py` takes about a minute. Its MuJoCo run (two steps of a small tower) is
-skipped when MuJoCo is not installed, and its GIF test also when Pillow, ffmpeg or an OpenGL
-context is missing. The page's WebGL drawing has no automated test; it was checked by eye in
-headless Chromium against the 2D fallback.
+`tests/test_helixturm.py` takes about a minute. Its MuJoCo test, which runs two steps of a
+small tower, is skipped if MuJoCo is not installed. Its GIF test is also skipped if Pillow,
+ffmpeg or an OpenGL context is missing. There is no automated test of the viewer's WebGL
+drawing. It was checked by eye in headless Chromium against the 2D fallback.

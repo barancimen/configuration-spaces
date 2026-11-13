@@ -35,7 +35,7 @@ from run_helixturm import Tower  # noqa: E402
 PAPER, INK, DIVIDER = 255, 16, 226
 # Everything is metal: one shade of grey per kind of part, whatever colours the file gives them
 # (0 is black, 1 is white). Parts that meet in the picture are far apart in shade.
-SHADES = {"panel": 0.88, "head": 0.74, "stator": 0.62, "rotor": 0.50, "push": 0.44, "lift": 0.36, "foot": 0.36, "bolt": 0.20}
+SHADES = {"panel": 0.88, "cap": 0.74, "stator": 0.62, "rotor": 0.50, "push": 0.44, "lift": 0.36, "foot": 0.36, "bolt": 0.20}
 WALLS = ("panel", "stator", "push", "head")     # bodies that hide the mechanism
 FRONT = 2                                       # geom group of the walls in front, so they can be left out
 FADE = 0.5                                      # turns of the rotor over which the walls in front fade away
@@ -188,17 +188,19 @@ def main():
 
     body = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or "" for b in m.geom_bodyid]
     kind = [b.rstrip("0123456789") for b in body]
+    cap = [k == "head" and math.hypot(*m.geom_pos[g][:2]) < 0.01 for g, k in enumerate(kind)]   # the head's lid, on the axis
     for g, k in enumerate(kind):
+        k = "cap" if cap[g] else "panel" if k == "head" else k    # the head's segment stubs are shaded like segments
         if k in SHADES:
             m.geom_rgba[g] = (SHADES[k],) * 3 + (1,)
 
     # what the views have to show (metres): the cam's base disc, the magazines, the finished tower's cap
     ring = lambda r, z, n=24: [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n), z) for i in range(n)]
     low = ring(hx.RHO + 0.045, hx.ZT0 - hx.OVER - 0.04) + ring(hx.X_END + 0.02, -0.02) + ring(hx.X_END + 0.02, hx.H)
-    cap = hx.level(tw.n) + hx.H + 0.03 + turns * hx.P
+    top = hx.level(tw.n) + hx.H + 0.03 + turns * hx.P
     views = []
     for cut, around, above, fades, widen in VIEWS:
-        points = low + (ring(hx.R_OUT + 0.03, cap) if cut is None else [(0, 0, cut)])
+        points = low + (ring(hx.R_OUT + 0.03, top) if cut is None else [(0, 0, cut)])
         cam = mujoco.MjvCamera()
         cam.type = mujoco.mjtCamera.mjCAMERA_FREE
         height, cam.distance, wide = aim(points, around, above)
@@ -206,13 +208,10 @@ def main():
         cam.azimuth, cam.elevation = around + 180, -above
         views.append((2 * math.ceil(px * wide * 1.03 / 2), cam, fades, widen))
         for g in range(m.ngeom if fades else 0):               # the walls on the camera's side of the axis
-            if kind[g] not in WALLS:
+            if kind[g] not in WALLS or cap[g]:
                 continue
             if kind[g] == "head":                              # one body: each piece by where it is
-                x, y = m.geom_pos[g][:2]
-                if math.hypot(x, y) < 0.01:
-                    continue                                   # the cap
-                column = math.atan2(y, x)
+                column = math.atan2(m.geom_pos[g][1], m.geom_pos[g][0])
             else:
                 column = int(body[g][len(kind[g]):]) % tw.n * tw.theta
             if math.cos(column - math.radians(around)) > 0:
