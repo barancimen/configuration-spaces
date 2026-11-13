@@ -59,8 +59,8 @@ def main():
 
     report_every, next_report = 0.5, 0.5
     if args.view:
-        import mujoco.viewer
-        with mujoco.viewer.launch_passive(m, d) as viewer:
+        from mujoco import viewer as mj_viewer   # binds only mj_viewer, not the name `mujoco`
+        with mj_viewer.launch_passive(m, d) as viewer:
             while viewer.is_running() and d.time < args.seconds:
                 start = time.time()
                 control()
