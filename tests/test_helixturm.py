@@ -167,7 +167,7 @@ def test_replay_page(small, tmp_path):
 
 def test_render_gif(small, tmp_path):
     """Three recorded frames, drawn by MuJoCo without a display, forwards and then back: grey parts
-    on white, and neither end of the motion shown twice."""
+    with black lines on white, and neither end of the motion shown twice."""
     pytest.importorskip("mujoco")
     Image = pytest.importorskip("PIL.Image")
     if shutil.which("ffmpeg") is None:
@@ -191,4 +191,5 @@ def test_render_gif(small, tmp_path):
     colours = [c for _, c in first.getcolors(maxcolors=100000)]
     assert min(first.getpixel((2, 2))) >= 250           # white background
     assert len(colours) > 8                             # a drawn scene, not an empty picture
-    assert all(max(c) - min(c) <= 6 for c in colours)   # and every part grey
+    assert all(max(c) - min(c) <= 6 for c in colours)   # every part grey
+    assert min(max(c) for c in colours) < 60            # and black lines

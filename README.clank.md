@@ -233,11 +233,14 @@ whose limit is 2 mm for every segment, counts 34 of 36 and reports the run as fa
 writes an animated GIF (it needs Pillow and ffmpeg; `MUJOCO_GL=egl` draws without a display).
 - **Two views** side by side on white, with no lettering: the whole tower, solid, and its base
   from closer up.
-- **Greys:** every part is grey, one shade per kind of part (all segments the same), whatever
-  colours the file gives them.
-- **Fading walls:** in the close view the walls on the camera's side of the axis fade away
-  completely during the rotor's first half turn, so the cam, the lifters and the latch bolts show.
-  These are the segments, magazines, guides and floor of three columns, and that side of the head.
+- **Drawn like a comic:** every part is grey, one shade per kind of part (all segments the same),
+  whatever colours the file gives them, with a black line around every body and along every
+  corner. MuJoCo draws the shaded picture; the script finds the lines afterwards, from how far
+  away each pixel is and which body it shows.
+- **Glass walls:** in the close view the walls on the camera's side of the axis turn to glass
+  during the rotor's first half turn, so the cam, the lifters and the latch bolts show: their
+  shade fades to 5%, their lines stay. These are the segments, magazines, guides and floor of
+  three columns, and that side of the head.
 - **Speed:** `--speed` sets how many times faster than real time it plays (default 4). The time
   the tower stands still at the end of the recording is left out.
 - **Loop:** `--rewind` then runs the pictures backwards to the start without a pause, so the loop
