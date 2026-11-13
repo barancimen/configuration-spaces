@@ -47,6 +47,7 @@ The page draws a mechanism at random valid poses. Open it in any browser; no ser
   and accepted only if it stayed close.
 - **Random walk:** repeats nearby steps.
 - **Parameters** are editable; `path:name=value` sets their starting values.
+- A body may set `color: "#rrggbb"` for drawing; otherwise colours come from a palette.
 
 Each mechanism is compiled into the page as JavaScript: equations, exact Jacobian, limits,
 poses, joint coordinates and shapes. Every shown pose satisfies the equations to about 1e-13,
@@ -266,6 +267,7 @@ Any node may carry `at`, `z`, `x`.
 | `tethered_puck` | implicit constraints on a free body |
 | `sliding_boxes` | exact box/box condition (\|s\| ≥ 2) and a `ForAll` fallback |
 | `door_stop` | collision turns a hinge's circle into an arc |
+| `stewart` | 14-body Stewart platform: six closed spatial loops, 37 variables, 6 freedoms |
 | `cube_on_cube` | claims: never convex, never hangs over, a deliberately false claim |
 | `make_snake.py` | generates an N-link chain with local claims (scaling test) |
 

@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from sympy import And, Matrix, S, Symbol, eye, sympify
+from sympy import And, Matrix, S, Symbol, eye, pi, sympify
 from sympy.printing.jscode import jscode
 
 from .compile import ALL_KINDS, compile_spec
@@ -104,12 +104,13 @@ def system_js(spec, system, defaults):
         prims = []
         if b.shape is not None:
             _prims(spec, b.shape, eye(4), prims, notes, name, js)
-        bodies.append(f'{{name: {json.dumps(name)}, frames: [{", ".join(frames)}], prims: [{", ".join(prims)}]}}')
+        bodies.append(f'{{name: {json.dumps(name)}, color: {json.dumps(b.color)}, frames: [{", ".join(frames)}], prims: [{", ".join(prims)}]}}')
     poses = ", ".join(f"{json.dumps(b)}: {js.mat(M)}" for b, M in system.poses.items())
     coords = ", ".join(
         f'{{name: {json.dumps(j.name)}, kind: {json.dumps(j.kind)}, values: {js.fn("x, p", "{" + ", ".join(f"{json.dumps(k)}: {js.e(e)}" for k, e in j.values.items()) + "}")}}}'
         for j in system.joints if j.values)
     params = [{"name": q.name, "value": float(defaults[q.name])} for q in P]
+    starts = _starts(spec, system, js)
     return f"""{{
   name: {json.dumps(spec.name)},
   vars: {json.dumps([v.name for v in X])},
@@ -125,8 +126,33 @@ def system_js(spec, system, defaults):
   poses: {js.fn("x, p", "{" + poses + "}")},
   joints: [{coords}],
   geometry: {js.fn("p", "[" + ", ".join(bodies) + "]")},
+  starts: {js.fn("p", "[" + ", ".join(starts) + "]")},
   notes: {json.dumps(notes)}
 }}"""
+
+
+def _starts(spec, system, js):
+    """Where random starts should come from: each tree joint's angles on their circle and within
+    their range, displacements within their range, rotations as unit quaternions."""
+    index = {v: i for i, v in enumerate(system.variables)}
+    out = []
+    for j in system.joints:
+        if not j.tree:
+            continue
+        lim = dict(j.opts.get("limits") or {})
+        if "range" in j.opts:
+            lim["angle" if "c" in j.values else "d"] = j.opts["range"]
+        for cr, sr, name in (("c", "s", "angle"), ("c1", "s1", "angle1"), ("c2", "s2", "angle2")):
+            if cr in j.values:
+                lo, hi = (spec.num(v) for v in lim[name]) if name in lim else (-pi, pi)
+                out.append(f'{{type: "angle", i: [{index[j.values[cr]]}, {index[j.values[sr]]}], lo: {js.e(lo)}, hi: {js.e(hi)}}}')
+        for r in ("d", "x", "y", "z"):
+            if r in j.values and r in lim:
+                lo, hi = (spec.num(v) for v in lim[r])
+                out.append(f'{{type: "length", i: {index[j.values[r]]}, lo: {js.e(lo)}, hi: {js.e(hi)}}}')
+        if "q0" in j.values:
+            out.append(f'{{type: "quat", i: [{", ".join(str(index[j.values[f"q{k}"]]) for k in range(4))}]}}')
+    return out
 
 
 def _defaults(spec, given):

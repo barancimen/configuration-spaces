@@ -1,0 +1,132 @@
+# Stewart platform (Gough-Stewart hexapod): a base, a top plate and six telescoping legs.
+# 14 bodies. Each leg: universal joint at the base, sliding joint (the piston), ball joint at
+# the plate. The plate attaches only through those ball joints, which close six loops, so the
+# plate gets free coordinates (position + unit quaternion) and the six legs pin it down:
+# 6 freedoms. Legs have a stroke limit; universal joints stay within 36 degrees.
+#   python3 -m cspace examples/stewart.yaml --view
+name: stewart
+bodies:
+  base:
+    color: "#46535f"
+    shape: {cylinder: [1.15, 0.08], at: [0, 0, -0.04]}
+    frames:
+      b1: {at: [0.966, 0.259, 0]}
+      b2: {at: [0.966, -0.259, 0]}
+      b3: {at: [-0.259, 0.966, 0]}
+      b4: {at: [-0.707, 0.707, 0]}
+      b5: {at: [-0.707, -0.707, 0]}
+      b6: {at: [-0.259, -0.966, 0]}
+  plate:
+    color: "#3f6f9f"
+    shape: {cylinder: [0.72, 0.06], at: [0, 0, 0.03]}
+    frames:
+      p1: {at: [0.424, 0.424, 0]}
+      p2: {at: [0.424, -0.424, 0]}
+      p3: {at: [0.155, 0.58, 0]}
+      p4: {at: [-0.58, 0.155, 0]}
+      p5: {at: [-0.58, -0.155, 0]}
+      p6: {at: [0.155, -0.58, 0]}
+  cyl1:                                 # leg 1: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod1:                                 # leg 1: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+  cyl2:                                 # leg 2: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod2:                                 # leg 2: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+  cyl3:                                 # leg 3: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod3:                                 # leg 3: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+  cyl4:                                 # leg 4: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod4:                                 # leg 4: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+  cyl5:                                 # leg 5: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod5:                                 # leg 5: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+  cyl6:                                 # leg 6: the housing, from the base joint up
+    color: "#8a96a3"
+    shape: {cylinder: [0.06, 1], at: [0, 0, 0.5]}
+    frames: {foot: {}}
+  rod6:                                 # leg 6: the piston, sliding inside the housing
+    color: "#b8862b"
+    shape: {cylinder: [0.035, 1], at: [0, 0, -0.1]}
+    frames: {top: {at: [0, 0, 0.4]}}
+constraints:
+  - fixed: [world, base]
+  - universal: [base.b1, cyl1.foot]
+    name: u1
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl1, rod1]
+    name: leg1
+    range: [0.8, 1.5]
+  - spherical: [rod1.top, plate.p1]
+    name: s1
+    closing: true
+  - universal: [base.b2, cyl2.foot]
+    name: u2
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl2, rod2]
+    name: leg2
+    range: [0.8, 1.5]
+  - spherical: [rod2.top, plate.p2]
+    name: s2
+    closing: true
+  - universal: [base.b3, cyl3.foot]
+    name: u3
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl3, rod3]
+    name: leg3
+    range: [0.8, 1.5]
+  - spherical: [rod3.top, plate.p3]
+    name: s3
+    closing: true
+  - universal: [base.b4, cyl4.foot]
+    name: u4
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl4, rod4]
+    name: leg4
+    range: [0.8, 1.5]
+  - spherical: [rod4.top, plate.p4]
+    name: s4
+    closing: true
+  - universal: [base.b5, cyl5.foot]
+    name: u5
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl5, rod5]
+    name: leg5
+    range: [0.8, 1.5]
+  - spherical: [rod5.top, plate.p5]
+    name: s5
+    closing: true
+  - universal: [base.b6, cyl6.foot]
+    name: u6
+    limits: {angle1: [-pi/5, pi/5], angle2: [-pi/5, pi/5]}
+  - prismatic: [cyl6, rod6]
+    name: leg6
+    range: [0.8, 1.5]
+  - spherical: [rod6.top, plate.p6]
+    name: s6
+    closing: true

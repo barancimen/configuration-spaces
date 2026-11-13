@@ -21,7 +21,7 @@ for (const sys of SYSTEMS) {
   const t0 = Date.now();
   let g = 0, gTries = 0, l = 0, worst = 0, dims = new Set(), x = null, maxStep = 0;
   for (let i = 0; i < 15; i++) {
-    const r = globalSample(sys, p, scale, 3000);
+    const r = globalSample(sys, p, scale, 4000);
     gTries += r.tries || 0;
     if (r.ok) { g++; x = r.x; worst = Math.max(worst, r.maxF); dims.add(freedoms(sys, r.x, p)); }
   }

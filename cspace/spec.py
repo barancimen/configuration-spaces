@@ -41,6 +41,7 @@ class Body:
     shape: object = None
     spec: object = field(default=None, repr=False)
     _frames: dict = field(default=None, repr=False)
+    color: str = None            # optional "#rrggbb", used only when drawing
 
     @property
     def frames(self):
@@ -155,7 +156,10 @@ def load(path, kinds, overrides=None):
         frames = {check_name(fn, "frame"): fd for fn, fd in (b.get("frames") or {}).items()}
         if bname == "world" and "shape" in b:
             raise SpecError("the world body carries frames only; make a body and fix it to world")
-        spec.bodies[bname] = Body(bname, frames, b.get("shape"), spec)
+        color = b.get("color")
+        if color is not None and not re.match(r"^#[0-9a-fA-F]{6}$", str(color)):
+            raise SpecError(f"body {bname!r}: color must look like \"#3f6f9f\"")
+        spec.bodies[bname] = Body(bname, frames, b.get("shape"), spec, color=color)
 
     for i, c in enumerate(raw.get("constraints") or [], 1):
         found = [k for k in c if k in kinds]

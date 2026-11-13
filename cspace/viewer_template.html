@@ -181,32 +181,30 @@ var CSPACE = (function () {
     const J = sys.J(x, p), JG = sys.JG(x, p), n = x.length;
     return J.concat(JG.map((row, i) => (G[i] < 0 ? row : new Array(n).fill(0))));
   }
-  // Pull x0 onto {F = 0, G >= 0} with Levenberg-Marquardt.
-  function project(sys, x0, p, iters = 80) {
-    let x = x0.slice(), R = residual(sys, x, p), f = norm2(R.r), lam = 1e-3;
-    const n = x.length;
-    for (let it = 0; it < iters && f > 1e-26 && n > 0; it++) {
-      const J = jacobian(sys, x, p, R.G);
-      const JTJ = Array.from({ length: n }, () => new Array(n).fill(0)), g = new Array(n).fill(0);
-      for (let i = 0; i < J.length; i++) {
-        const row = J[i], ri = R.r[i];
-        for (let a = 0; a < n; a++) {
-          if (row[a] === 0) continue;
-          g[a] += row[a] * ri;
-          for (let b = 0; b < n; b++) JTJ[a][b] += row[a] * row[b];
-        }
+  // Pull x0 onto {F = 0, G >= 0}: minimum-norm Newton steps d = -J^T (J J^T + mu I)^-1 r, where
+  // violated inequalities count as equations, with a backtracking line search on |r|.
+  function project(sys, x0, p, iters = 150) {
+    let x = x0.slice(), R = residual(sys, x, p), f = norm2(R.r), mu = 1e-12, checkpoint = f;
+    for (let it = 0; it < iters && f > 1e-26 && x.length > 0; it++) {
+      const J = jacobian(sys, x, p, R.G), m = J.length;
+      if (!m) break;
+      const JJt = J.map(a => J.map(b => a.reduce((acc, v, i) => acc + v * b[i], 0)));
+      const tr = JJt.reduce((acc, r, i) => acc + r[i], 0) / m || 1;
+      JJt.forEach((r, i) => { r[i] += mu * tr + 1e-14; });
+      const y = solve(JJt, R.r);
+      if (!y || !finite(y)) { mu *= 100; if (mu > 1) break; continue; }
+      const d = x.map((_, k) => -J.reduce((acc, row, i) => acc + row[k] * y[i], 0));
+      let t = 1, moved = false;
+      for (let h = 0; h < 30; h++, t /= 2) {
+        const xn = x.map((v, k) => v + t * d[k]), Rn = residual(sys, xn, p), fn = norm2(Rn.r);
+        if (Number.isFinite(fn) && fn < f) { x = xn; R = Rn; f = fn; moved = true; break; }
       }
-      let moved = false;
-      for (let t = 0; t < 10; t++) {
-        const A = JTJ.map((row, a) => row.map((v, b) => (a === b ? v * (1 + lam) + lam * 1e-6 + 1e-14 : v)));
-        const d = solve(A, g.map(v => -v));
-        if (!d || !finite(d)) { lam *= 10; continue; }
-        const xn = x.map((v, i) => v + d[i]);
-        const Rn = residual(sys, xn, p), fn = norm2(Rn.r);
-        if (Number.isFinite(fn) && fn < f) { x = xn; R = Rn; f = fn; lam = Math.max(lam / 3, 1e-12); moved = true; break; }
-        lam *= 10;
+      if (moved) mu = Math.max(mu / 10, 1e-12);
+      else { mu *= 100; if (mu > 1) break; }
+      if (it % 25 === 24) {                // give up early on a start that has stopped improving
+        if (f > 1e-12 && f > 0.6 * checkpoint) break;
+        checkpoint = f;
       }
-      if (!moved) break;
     }
     const maxF = R.F.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
     const minG = R.G.reduce((m, v) => Math.min(m, v), Infinity);
@@ -214,13 +212,23 @@ var CSPACE = (function () {
     return { x, maxF, minG, clear, ok: finite(x) && maxF < 1e-8 && !(minG < -1e-9) && clear };
   }
   const unitScale = (sys, scale) => sys.kinds.map(k => (k === "unit" ? 1 : scale));
-  function globalSample(sys, p, scale, budgetMs = 2500) {
-    const s = unitScale(sys, scale), t0 = performance.now();
+  // A random start: angles on their circle within their joint's range, displacements within
+  // their stroke, rotations as random unit quaternions, everything else in a box around the scene.
+  function randomStart(sys, p, scale) {
+    const x = sys.kinds.map(k => (Math.random() * 2 - 1) * (k === "unit" ? 1 : 1.5 * scale));
+    for (const g of sys.starts(p)) {
+      if (g.type === "angle") { const th = g.lo + Math.random() * (g.hi - g.lo); x[g.i[0]] = Math.cos(th); x[g.i[1]] = Math.sin(th); }
+      else if (g.type === "length") x[g.i] = g.lo + Math.random() * (g.hi - g.lo);
+      else { const q = g.i.map(() => randn()), n = Math.hypot(...q) || 1; g.i.forEach((k, j) => { x[k] = q[j] / n; }); }
+    }
+    return x;
+  }
+  function globalSample(sys, p, scale, budgetMs = 4000) {
+    const t0 = performance.now();
     let tries = 0, lastFail = null;
     while (performance.now() - t0 < budgetMs) {
       tries++;
-      const x0 = s.map(si => (Math.random() * 2 - 1) * si * (si === 1 ? 1 : 1.5));
-      const res = project(sys, x0, p);
+      const res = project(sys, randomStart(sys, p, scale), p);
       if (res.ok) return Object.assign(res, { tries });
       lastFail = res;
       if (sys.vars.length === 0) break;
@@ -447,7 +455,7 @@ var CSPACE = (function () {
     let i = 0;
     state.bodies = geo.map(b => {
       const isWorld = b.name === "world";
-      const color = rgb(isWorld ? muted : PART_COLORS[i++ % PART_COLORS.length]);
+      const color = rgb(b.color || (isWorld ? muted : PART_COLORS[i++ % PART_COLORS.length]));
       const body = { name: b.name, color, alpha: 1, faces: [], balls: [], rods: [], markers: b.frames, markerColor: isWorld ? muted : brass };
       for (const pr of b.prims) {
         if (pr.flag === "ghost") body.alpha = 0.35;
