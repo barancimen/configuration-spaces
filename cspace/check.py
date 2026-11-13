@@ -19,7 +19,7 @@ def parameter_values(system, rng):
     raise ValueError("could not pick parameter values that satisfy the assumptions")
 
 
-def sample(system, tries=30, seed=0, values=None, tol=1e-9):
+def sample(system, tries=30, seed=0, values=None, tol=1e-9, starts=None):
     """Return (parameter values, [(point, local dimension), ...])."""
     rng = np.random.default_rng(seed)
     vals = values if values is not None else parameter_values(system, rng)
@@ -45,8 +45,8 @@ def sample(system, tries=30, seed=0, values=None, tol=1e-9):
         return np.vstack(rows)
 
     points = []
-    for _ in range(tries):
-        x0 = rng.uniform(-2, 2, len(X))
+    for k in range(tries):
+        x0 = starts[k] if starts is not None else rng.uniform(-2, 2, len(X))
         sol = least_squares(resid, x0, jac=jac if eqs or ineqs else "2-point",
                             xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=4000)
         if np.max(np.abs(resid(sol.x)), initial=0.0) < tol:

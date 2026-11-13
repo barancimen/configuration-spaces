@@ -103,6 +103,36 @@ Not exported, reported as warnings:
 MuJoCo enforces constraints softly, so loops drift slightly during simulation, and contact
 replaces `no_overlap`.
 
+**Simulation-only keys.** None of these change the configuration space, the prover or the viewer:
+
+```yaml
+constraints:
+  - revolute: [world.holdPivot, holdPawl]
+    name: holdPawl
+    spring: {stiffness: 0.02, rest: 0.35, damping: 0.001}   # joint stiffness and springref
+  - contact: [holdPawl, ratchet]       # these bodies collide in MuJoCo
+    friction: 0.2
+start:                                 # initial pose: listed joints held exactly, loops closed
+  holdPawl: -0.25
+simulation:                            # defaults for the exporter; command-line flags override
+  gravity: false
+  timestep: 0.0005
+  motors: {lever: {kp: 5, damping: 0.05}}
+```
+
+`contact` differs from `no_overlap`. `no_overlap` restricts the configuration space and is exact,
+but for toothed parts its formulas are far too large. `contact` only tells MuJoCo which shapes
+push on each other.
+
+`examples/ratchet_drive.yaml` combines all of this in 10 bodies:
+- a motor-driven lever with a spring-loaded drive pawl;
+- a 12-tooth ratchet held by a spring-loaded latch pawl;
+- a 3-gear train;
+- a slider-crank;
+- a detent catch that clicks into a V-notch on the slider.
+
+The tests check that its start pose has no contact pair interpenetrating.
+
 **How it is tested.** MuJoCo isn't installed where this was written, so `tests/test_mjcf.py`
 uses a small forward-kinematics interpreter that follows MuJoCo's documented conventions. For
 every keyframe of nine models, it reproduces the compiler's body poses to 1e-8. Every connect,

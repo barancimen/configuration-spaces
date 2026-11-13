@@ -67,6 +67,8 @@ class Spec:
     bodies: dict = field(default_factory=dict)
     constraints: list = field(default_factory=list)
     claims: list = field(default_factory=list)       # raw claim entries, for the prover
+    start: dict = field(default_factory=dict)
+    simulation: dict = field(default_factory=dict)
     _cache: dict = field(default_factory=dict, repr=False)
 
     def num(self, v, extra=None):
@@ -169,4 +171,6 @@ def load(path, kinds, overrides=None):
         opts = {k: v for k, v in c.items() if k not in (kind, "name")}
         spec.constraints.append(Constraint(kind, c[kind], check_name(c.get("name", f"j{i}"), "constraint"), opts))
     spec.claims = list(raw.get("claims") or [])
+    spec.start = dict(raw.get("start") or {})              # simulation only: initial joint values
+    spec.simulation = dict(raw.get("simulation") or {})    # simulation only: gravity, timestep, motors
     return spec

@@ -128,9 +128,9 @@ def fmt(v):
 # ---------- the exporter ----------
 
 class Exporter:
-    def __init__(self, spec, system, density=1000.0, damping=0.05, gravity=True):
+    def __init__(self, spec, system, density=1000.0, damping=0.05, gravity=True, timestep=0.002):
         self.spec, self.system = spec, system
-        self.density, self.damping, self.gravity = density, damping, gravity
+        self.density, self.damping, self.gravity, self.timestep = density, damping, gravity, timestep
         self.warnings = []
         X = system.variables
         self._pose = {b: lambdify(X, M, "numpy") for b, M in system.poses.items()}
@@ -246,11 +246,11 @@ class Exporter:
                 self._walk(v[0], T, out, body)
 
     # ---------- the document ----------
-    def build(self, x0, keyframes=(), motors=(), kp=None):
+    def build(self, x0, keyframes=(), motors=(), kp=None, motor_settings=None):
         spec, system = self.spec, self.system
         root = ET.Element("mujoco", model=spec.name)
         ET.SubElement(root, "compiler", angle="radian", autolimits="true")
-        ET.SubElement(root, "option", timestep="0.002", integrator="implicitfast",
+        ET.SubElement(root, "option", timestep=f"{self.timestep:g}", integrator="implicitfast",
                       gravity="0 0 -9.81" if self.gravity else "0 0 0")
         default = ET.SubElement(root, "default")
         ET.SubElement(default, "geom", contype="0", conaffinity="0", density=f"{self.density:g}")
@@ -287,6 +287,11 @@ class Exporter:
                         rng = self.joint_range(j, k)
                         if rng is not None:
                             attrs["range"] = fmt(rng)
+                    if "spring" in j.opts:
+                        if len(mjs) != 1 or mj["type"] == "ball":
+                            self.warnings.append(f"{j.name}: springs are exported for single-axis joints only")
+                        else:
+                            attrs.update(self.spring(j))
                     self.joint_el[name] = ET.SubElement(el, "joint", **attrs)
                 if "cone" in j.opts:
                     self.warnings.append(f"{j.name}: cone limit not exported (MuJoCo's ball range measures "
@@ -323,7 +328,7 @@ class Exporter:
 
         self._equalities(root, x0)
         self._contacts(root, geom_names)
-        mj_names = self._motors(root, motors, kp, x0)
+        mj_names = self._motors(root, motors, kp, x0, motor_settings)
         keys = ET.SubElement(root, "keyframe")
         for i, x in enumerate([x0] + list(keyframes)):
             attrs = {"name": "sample" if i == 0 else f"sample{i + 1}", "qpos": fmt(self.qpos(x, x0))}
@@ -355,6 +360,17 @@ class Exporter:
                     vals[name] = q[i]
                     i += 1
         return vals
+
+    def spring(self, j):
+        """MJCF attributes for spring: {stiffness, rest, damping} (rest in joint units)."""
+        sp = j.opts["spring"]
+        if not isinstance(sp, dict) or "stiffness" not in sp:
+            raise SpecError(f"{j.name}: spring needs at least a stiffness: spring: {{stiffness: k, rest: value}}")
+        out = {"stiffness": f"{float(self.spec.num(sp['stiffness'])):g}",
+               "springref": f"{float(self.spec.num(sp.get('rest', 0))):.10g}"}
+        if "damping" in sp:
+            out["damping"] = f"{float(self.spec.num(sp['damping'])):g}"
+        return out
 
     def joint_range(self, j, k):
         """Range of MuJoCo joint k of tree joint j, from the joint's range / limits, if any."""
@@ -423,15 +439,19 @@ class Exporter:
     def _contacts(self, root, geom_names):
         pairs = []
         for c in self.spec.constraints:
-            if c.kind == "no_overlap":
+            if c.kind in ("no_overlap", "contact"):
                 a, b = (str(n) for n in c.args)
-                pairs += [(g1, g2) for g1 in geom_names.get(a, []) for g2 in geom_names.get(b, [])]
+                extra = {}
+                if "friction" in c.opts:      # sliding friction; small torsional and rolling terms
+                    f = float(self.spec.num(c.opts["friction"]))
+                    extra["friction"] = f"{f:g} {f:g} 0.005 0.0001 0.0001"
+                pairs += [(g1, g2, extra) for g1 in geom_names.get(a, []) for g2 in geom_names.get(b, [])]
         if pairs:
             contact = ET.SubElement(root, "contact")
-            for g1, g2 in pairs:
-                ET.SubElement(contact, "pair", geom1=g1, geom2=g2)
+            for g1, g2, extra in pairs:
+                ET.SubElement(contact, "pair", geom1=g1, geom2=g2, **extra)
 
-    def _motors(self, root, motors, kp, x0):
+    def _motors(self, root, motors, kp, x0, settings=None):
         if not motors:
             return []
         act = ET.SubElement(root, "actuator")
@@ -444,12 +464,16 @@ class Exporter:
                 raise SpecError(f"--motors: {m!r} is not a hinge or slide of the exported model "
                                 f"(known: {', '.join(sorted(known))})")
             slide = self.joint_el[m].get("type") == "slide"
-            if kp is None:   # gravity moves the joint by about 1% of the mechanism's size
-                gain = weight / (0.01 * self.scale) if slide else weight * self.scale / 0.01
-            else:
+            own = (settings or {}).get(m) or {}
+            if kp is not None:
                 gain = kp
+            elif "kp" in own:
+                gain = float(self.spec.num(own["kp"]))
+            else:   # gravity moves the joint by about 1% of the mechanism's size
+                gain = weight / (0.01 * self.scale) if slide else weight * self.scale / 0.01
             inertia = self.mass / n * (1 if slide else self.scale ** 2)
-            self.joint_el[m].set("damping", f"{2 * np.sqrt(gain * inertia):.6g}")   # near critical
+            damp = float(self.spec.num(own["damping"])) if "damping" in own else 2 * np.sqrt(gain * inertia)
+            self.joint_el[m].set("damping", f"{damp:.6g}")   # by default near critical
             attrs = {"name": f"{m}_motor", "joint": m, "kp": f"{gain:.6g}"}
             j = next((j for j in self.ordered if j.name == m), None)
             if j is not None:
@@ -476,20 +500,97 @@ def valid_samples(system, count, seed=0):
     return out[:count]
 
 
-def export(path, given=None, keyframes=1, motors=(), kp=None, density=1000.0, damping=0.05,
-           gravity=True, seed=0):
-    """Returns (xml text, exporter, samples)."""
+def start_pose(spec, system):
+    """The configuration given by the file's start: block (joint name -> value, or a list for joints
+    with several coordinates). Listed coordinates are held exactly while the rest is pulled onto the
+    configuration space, so loops close. Joints not listed start at zero (or mid-range)."""
+    from scipy.optimize import least_squares
+    from sympy import Matrix, cos, sin
+    X = system.variables
+    index = {v: i for i, v in enumerate(X)}
+    x = np.zeros(len(X))
+    joints = {j.name: j for j in system.joints if j.tree}
+    for j in joints.values():
+        for cr in ("c", "c1", "c2"):
+            if cr in j.values:
+                x[index[j.values[cr]]] = 1.0
+        if "q0" in j.values:
+            x[index[j.values["q0"]]] = 1.0
+        if "d" in j.values and "range" in j.opts:
+            x[index[j.values["d"]]] = sum(float(spec.num(v)) for v in j.opts["range"]) / 2
+    held = []                                    # extra equations: the listed coordinates
+    for name, value in spec.start.items():
+        if name not in joints:
+            raise SpecError(f"start: {name!r} is not a tree joint (closing joints follow from the others)")
+        j = joints[name]
+        vals = value if isinstance(value, list) else [value]
+        roles = [r for _, _, r in ELEMENTS[j.kind] if r != "q"]
+        if len(vals) != len(roles):
+            raise SpecError(f"start: {name!r} ({j.kind}) needs {len(roles)} value(s): {roles}")
+        for role, v in zip(roles, vals):
+            v = float(spec.num(v))
+            if role.startswith("c"):
+                c, s_ = j.values[role], j.values["s" + role[1:]]
+                x[index[c]], x[index[s_]] = np.cos(v), np.sin(v)
+                held += [c - cos(v), s_ - sin(v)]
+            else:
+                x[index[j.values[role]]] = v
+                held.append(j.values[role] - v)
+    eqs, ineqs = list(system.equations) + held, list(system.inequalities)
+    F = lambdify(X, eqs, "numpy")
+    J = lambdify(X, Matrix(eqs).jacobian(X), "numpy")
+    G = lambdify(X, ineqs, "numpy")
+    JG = lambdify(X, Matrix(ineqs).jacobian(X) if ineqs else Matrix.zeros(1, len(X)), "numpy")
+
+    def resid(z):
+        g = np.atleast_1d(np.array(G(*z), float)) if ineqs else np.zeros(0)
+        return np.concatenate([np.atleast_1d(np.array(F(*z), float)), np.minimum(g, 0)])
+
+    def jac(z):
+        rows = [np.array(J(*z), float).reshape(-1, len(X))]
+        if ineqs:
+            g = np.atleast_1d(np.array(G(*z), float))
+            rows.append(np.array(JG(*z), float).reshape(-1, len(X)) * (g < 0)[:, None])
+        return np.vstack(rows)
+
+    sol = least_squares(resid, x, jac=jac, xtol=1e-15, ftol=1e-15, gtol=1e-15, max_nfev=2000)
+    if np.max(np.abs(resid(sol.x)), initial=0.0) > 1e-9:
+        raise SpecError("start: the listed values cannot all hold on the configuration space "
+                        "(a closed loop or coupling contradicts them); list fewer joints")
+    return sol.x
+
+
+def export(path, given=None, keyframes=1, motors=None, kp=None, density=1000.0, damping=0.05,
+           gravity=None, seed=0, timestep=None):
+    """Returns (xml text, exporter, samples). Unset options come from the file's simulation: block."""
+    from .spec import truthy
     from .viewer import _defaults
     spec = load(path, ALL_KINDS)
     if spec.params:
         vals = _defaults(spec, dict(given or {}))
         spec = load(path, ALL_KINDS, {k: str(v) for k, v in vals.items()})
+    sim = spec.simulation
+    if gravity is None:
+        gravity = truthy(sim.get("gravity", "true"))
+    if timestep is None:
+        timestep = float(spec.num(sim.get("timestep", "0.002")))
+    settings = sim.get("motors") or {}
+    if isinstance(settings, list):
+        settings = {str(m): {} for m in settings}
+    if motors is None:
+        motors = list(settings)
     system = compile_spec(spec, shapes=False)
-    ex = Exporter(spec, system, density, damping, gravity)
-    xs = valid_samples(system, max(1, keyframes), seed)
+    ex = Exporter(spec, system, density, damping, gravity, timestep)
+    if spec.start:
+        xs = [start_pose(spec, system)] + (valid_samples(system, keyframes - 1, seed) if keyframes > 1 else [])
+    else:
+        xs = valid_samples(system, max(1, keyframes), seed)
     if any(quantified(f) for f in system.formulas):
         ex.warnings.append("no_overlap conditions quantified over points were not checked for the sample")
-    return ex.build(xs[0], xs[1:], motors, kp), ex, xs
+    if any(c.kind == "contact" for c in spec.constraints) and len(xs) > (1 if spec.start else 0):
+        ex.warnings.append("contact pairs are not checked when sampling; random keyframes may start with "
+                           "parts inside each other" + ("" if spec.start else " (add a start: block)"))
+    return ex.build(xs[0], xs[1:], motors, kp, settings), ex, xs
 
 
 def main(argv=None):
@@ -503,13 +604,14 @@ def main(argv=None):
                     help="position actuator gain (default: gravity moves a joint by about 1%% of the size)")
     ap.add_argument("--density", type=float, default=1000.0)
     ap.add_argument("--damping", type=float, default=0.05)
-    ap.add_argument("--no-gravity", action="store_true")
+    ap.add_argument("--no-gravity", action="store_true", help="default: the file's simulation: gravity")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args(argv)
     path, given = parse_entry(args.spec)
     try:
-        text, ex, xs = export(path, given, args.keyframes, [m for m in args.motors.split(",") if m],
-                              args.kp, args.density, args.damping, not args.no_gravity, args.seed)
+        motors = [m for m in args.motors.split(",") if m] or None
+        text, ex, xs = export(path, given, args.keyframes, motors, args.kp, args.density, args.damping,
+                              False if args.no_gravity else None, args.seed)
     except SpecError as err:
         print(f"error: {err}", file=sys.stderr)
         return 2

@@ -172,3 +172,83 @@ def test_structure_names_and_controls(exports):
     assert any("cone limit" in w for w in ex_rssr.warnings)
     xml_door = exports["door_stop"][0]
     assert len(ET.fromstring(xml_door).find("contact")) == 1
+
+
+# ---------- the ratchet drive: springs, contacts, start pose, simulation settings ----------
+
+def geom_vertices(g, T_body):
+    """World vertices of a box, cylinder (as a 32-sided prism) or mesh geom."""
+    if g.get("type") == "mesh":
+        return None
+    T = T_body @ trans(vec(g.get("pos", "0 0 0"))) @ quat_matrix(vec(g.get("quat", "1 0 0 0")))
+    size = vec(g.get("size"))
+    if g.get("type") == "box":
+        local = [[sx * size[0], sy * size[1], sz * size[2]] for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+    elif g.get("type") == "cylinder":
+        r, h = size
+        local = [[r * np.cos(a), r * np.sin(a), z] for a in np.linspace(0, 2 * np.pi, 32, endpoint=False) for z in (-h, h)]
+    else:
+        raise ValueError(g.get("type"))
+    return np.array([(T @ np.append(p, 1))[:3] for p in local])
+
+
+def interiors_meet(P, Q):
+    """Do the interiors of the convex hulls of point sets P and Q intersect? (linear programming)"""
+    from scipy.optimize import linprog
+    from scipy.spatial import ConvexHull
+    rows = [ConvexHull(P).equations, ConvexHull(Q).equations]
+    A = np.vstack([r[:, :3] for r in rows])
+    b = -np.concatenate([r[:, 3] for r in rows])
+    res = linprog(c=[0, 0, 0, -1], A_ub=np.hstack([A, np.ones((len(A), 1))]), b_ub=b,
+                  bounds=[(None, None)] * 3 + [(None, 1)], method="highs")
+    return -res.fun > 1e-9
+
+
+@pytest.fixture(scope="module")
+def ratchet():
+    return export(EXAMPLES / "ratchet_drive.yaml")
+
+
+def test_ratchet_settings_springs_and_start(ratchet):
+    xml, ex, xs = ratchet
+    root = ET.fromstring(xml)
+    assert root.find("option").get("gravity") == "0 0 0" and root.find("option").get("timestep") == "0.0005"
+    joints = {j.get("name"): j for j in root.find("worldbody").iter("joint")}
+    for name, rest in (("drivePawl", "0.35"), ("holdPawl", "0.35"), ("catch", "0.3")):
+        assert joints[name].get("springref") == rest and float(joints[name].get("stiffness")) > 0
+    (motor,) = list(root.find("actuator"))
+    assert motor.get("joint") == "lever" and motor.get("kp") == "5" and joints["lever"].get("damping") == "0.05"
+    (key,) = keyframes(xml)
+    vals = joint_values(xml, key[1])
+    for name in ("drivePawl", "holdPawl", "catch"):
+        assert abs(vals[name] + 0.25) < 1e-6, name               # lifted, as the start block says
+    assert abs(vals["lever"]) < 1e-6
+    fk = mj_fk(xml, key[1])
+    for body, T in fk.items():
+        assert np.abs(T - ex.pose(body, xs[0])).max() < 1e-8, body
+
+
+def test_ratchet_contacts_start_clear(ratchet):
+    xml, _, _ = ratchet
+    root = ET.fromstring(xml)
+    pairs = list(root.find("contact"))
+    assert len(pairs) == 2 * 14 + 2 * 14 + 2 * 3                 # pawl pieces x ratchet pieces, catch x slider
+    assert all(p.get("friction", "").startswith("0.2 0.2") for p in pairs)
+    meshes = {m.get("name"): vec(m.get("vertex")).reshape(-1, 3) for m in root.find("asset")}
+    (key,) = keyframes(xml)
+    fk = mj_fk(xml, key[1])
+    geoms, body_of = {}, {}
+    for b in root.find("worldbody").iter("body"):
+        for g in b.findall("geom"):
+            geoms[g.get("name")], body_of[g.get("name")] = g, b.get("name")
+
+    def world(name):
+        g = geoms[name]
+        T = fk[body_of[name]]
+        if g.get("type") == "mesh":
+            Tg = T @ trans(vec(g.get("pos"))) @ quat_matrix(vec(g.get("quat")))
+            return np.array([(Tg @ np.append(p, 1))[:3] for p in meshes[g.get("mesh")]])
+        return geom_vertices(g, T)
+
+    for p in pairs:
+        assert not interiors_meet(world(p.get("geom1")), world(p.get("geom2"))), (p.get("geom1"), p.get("geom2"))

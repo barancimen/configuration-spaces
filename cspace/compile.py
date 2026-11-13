@@ -7,7 +7,7 @@ from .joints import KINDS, coordinate, coupling, limits
 from .se3 import inv, split
 from .spec import SpecError, truthy
 
-OTHER_KINDS = {"couple", "gear", "no_overlap"}
+OTHER_KINDS = {"couple", "gear", "no_overlap", "contact"}   # contact: simulation only
 ALL_KINDS = set(KINDS) | OTHER_KINDS
 ANGLE_ROLES = (("c", "s"), ("c1", "s1"), ("c2", "s2"))
 
@@ -264,6 +264,11 @@ def compile_spec(spec, coords="reduced", trig=False, shapes=True):
             terms = [(n1, joint_coord(c.args[0])), (sign * n2, joint_coord(c.args[1]))]
             equations += coupling(terms, spec.num(c.opts.get("phase", 0)), trig)
             n_couplings += 1
+        elif c.kind == "contact":
+            # Bodies that push on each other in simulation. Not a constraint on the configuration
+            # space (use no_overlap for that); the MJCF exporter turns it into contact pairs.
+            if not isinstance(c.args, list) or len(c.args) != 2 or not all(str(b) in spec.bodies for b in c.args):
+                raise SpecError(f"contact {c.name!r}: expected [body, body] with two known bodies")
         elif c.kind == "no_overlap":
             from .shapes import no_overlap
             f, note = no_overlap(spec, c, poses, red)
